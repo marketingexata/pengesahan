@@ -1,0 +1,788 @@
+<!DOCTYPE html>
+<html lang="id" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Edit Pengesahan</title>
+
+<style>
+/* =====================================================
+   1. TOKEN TEMA (terang = default, gelap = data-theme="dark")
+   ===================================================== */
+:root{
+  --bg:#eef1f5; --pn:#ffffff; --pn2:#f4f6fa; --stage:#dfe4ec;
+  --tx:#18202c; --mu:#5b6677; --bd:#d5dbe4;
+  --ac:#3a56d4; --acx:#ffffff;
+  color-scheme:light;
+}
+:root[data-theme="dark"]{
+  --bg:#0f1218; --pn:#181c24; --pn2:#202530; --stage:#12151c;
+  --tx:#e7ebf2; --mu:#98a3b5; --bd:#2c3340;
+  --ac:#8aa4ff; --acx:#0f1218;
+  color-scheme:dark;
+}
+
+
+/* =====================================================
+   2. LAYOUT DASAR (desktop: panel kiri + preview kanan)
+   ===================================================== */
+*{box-sizing:border-box}
+body{
+  margin:0; display:flex; height:100vh; height:100dvh;
+  font:14px/1.45 "Segoe UI",Arial,sans-serif;
+  background:var(--bg); color:var(--tx);
+}
+
+
+/* =====================================================
+   3. PANEL KONTROL
+   ===================================================== */
+#panel{
+  width:380px; flex:none; overflow-y:auto; -webkit-overflow-scrolling:touch;
+  padding:0 18px 20px; background:var(--pn); border-right:1px solid var(--bd);
+}
+.head{display:flex; align-items:flex-start; justify-content:space-between; gap:8px; padding:16px 0 12px}
+.head h1{font-size:18px; margin:0}
+.head p{margin:2px 0 0; font-size:12px; color:var(--mu)}
+
+.step{padding:14px 0; border-bottom:1px solid var(--bd)}
+.step h2{display:flex; align-items:center; gap:8px; margin:0; font-size:14px}
+.step .n{
+  flex:none; width:22px; height:22px; border-radius:50%;
+  display:grid; place-items:center; font-size:12px; font-weight:700;
+  background:var(--ac); color:var(--acx);
+}
+.step p.d{margin:4px 0 10px 30px; font-size:12.5px; color:var(--mu)}
+.msg{margin:8px 0 0 30px; font-size:12px; color:var(--mu)}
+
+/* area unggah */
+#drop{
+  border:2px dashed var(--bd); border-radius:8px; padding:18px 12px;
+  text-align:center; cursor:pointer; color:var(--mu);
+}
+#drop:hover,#drop.on,#drop:focus-visible{border-color:var(--ac); color:var(--ac)}
+
+/* tombol & input */
+button{
+  font:inherit; padding:8px 10px; border:1px solid var(--bd); border-radius:6px;
+  background:var(--pn2); color:var(--tx); cursor:pointer;
+}
+button:hover{border-color:var(--ac)}
+button:focus-visible,input:focus-visible,summary:focus-visible{outline:2px solid var(--ac); outline-offset:2px}
+.row{display:flex; gap:6px; flex-wrap:wrap}
+.row button{flex:1}
+button.primary{width:100%; margin-top:16px; padding:12px; font-weight:600; background:var(--ac); color:var(--acx); border-color:var(--ac)}
+input[type=text]{
+  width:100%; padding:9px; border:1px solid var(--bd); border-radius:6px;
+  background:var(--pn2); color:var(--tx); font:700 14px Arial,sans-serif;
+}
+.check{display:flex; align-items:center; gap:8px; margin:6px 0; font-size:13px}
+.check input{width:18px; height:18px; accent-color:var(--ac)}
+
+/* slider + tombol reset kecil */
+.prow{display:flex; align-items:center; gap:8px; margin-top:6px; font-size:12px; color:var(--mu)}
+.prow label{flex:1}
+.prow output{color:var(--tx); font-weight:600}
+button.rs{padding:0 6px; line-height:20px; font-size:13px}
+input[type=range]{width:100%; margin:4px 0 2px; accent-color:var(--ac)}
+
+/* opsi lanjutan */
+details{margin-top:14px; border:1px solid var(--bd); border-radius:8px; padding:0 12px}
+summary{cursor:pointer; padding:11px 0; font-weight:600}
+details[open] summary{border-bottom:1px solid var(--bd); margin-bottom:8px}
+details h3{margin:12px 0 0; font-size:12.5px; color:var(--ac)}
+
+
+/* =====================================================
+   4. PREVIEW
+   ===================================================== */
+#preview{position:relative; flex:1; min-width:0; display:flex; flex-direction:column; background:var(--stage)}
+#mn{flex:1; min-width:0; min-height:0; display:flex; overflow:auto; padding:8px}
+
+#dlbar{flex:none; padding:8px 12px calc(8px + env(safe-area-inset-bottom)); background:var(--pn); border-top:1px solid var(--bd)}
+#dlbar button.primary{margin-top:0}
+#stage{position:relative; flex:none; margin:auto}
+#cv{position:absolute; background:#fff; box-shadow:0 2px 14px #0005}
+#ov{position:absolute; left:0; top:0; touch-action:none; cursor:grab}
+
+#zoombar{position:absolute; top:10px; right:10px; z-index:5; display:flex; gap:4px}
+#zoombar button{min-width:36px; background:var(--pn); box-shadow:0 1px 4px #0003}
+
+
+/* =====================================================
+   5. RESPONSIF (HP: preview beku di atas, parameter scroll di bawah)
+   ===================================================== */
+@media (max-width:820px){
+  body{flex-direction:column}
+  #preview{order:-1; flex:none; width:100%; height:50vh; height:50dvh; border-bottom:1px solid var(--bd)}
+  #panel{flex:1; width:100%; min-height:0; border-right:0}
+}
+</style>
+</head>
+
+
+<body>
+
+<!-- =====================================================
+     PANEL: langkah-langkah
+     ===================================================== -->
+<aside id="panel">
+
+  <header class="head">
+    <div>
+      <h1>PengesahApp</h1>
+      <p>Edit nama pengesahan jadi gampang, PANG PENG</p>
+    </div>
+    <button id="theme" type="button">Mode gelap</button>
+  </header>
+
+  <!-- Langkah 1 -->
+  <section class="step">
+    <h2><span class="n">1</span>Upload foto paspornya</h2>
+    <p class="d">Upload atau seret foto di sini.</p>
+    <div id="drop" tabindex="0">Klik untuk memilih foto atau seret ke sini
+      <input id="file" type="file" accept="image/*" hidden>
+    </div>
+  </section>
+
+  <!-- Langkah 2 -->
+  <section class="step">
+    <h2><span class="n">2</span>Koreksi foto</h2>
+    <p class="d">Kalo foto miring, pakai “Auto geometri total”.</p>
+    <div class="row">
+      <button id="total" type="button">Auto geometri total</button>
+      <button id="auto" type="button">Auto geometri</button>
+      <button id="reset" type="button">Reset foto</button>
+    </div>
+    <p class="msg" id="msg">Di preview: tarik titik kuning untuk perspektif, lingkaran ↻ kuning untuk memutar foto, lingkaran ↻ hijau untuk memutar teks.</p>
+  </section>
+
+  <!-- Langkah 3 -->
+  <section class="step">
+    <h2><span class="n">3</span>Skala foto / crop</h2>
+    <p class="d">Atur skala buat crop sisi foto yang gak terpakai.</p>
+    <div data-slider="scl"></div>
+  </section>
+
+  <!-- Langkah 4 -->
+  <section class="step">
+    <h2><span class="n">4</span>Input nama pengesahan, atur posisinya di layar preview ya.</h2>
+    <p class="d">Buat nama pengesahan di bawah “NAMA TAMBAHAN / ADDITIONAL NAME :”.</p>
+    <input type="text" id="nm" value="NAMANYA MUNCUL DISINI" aria-label="Nama">
+  </section>
+
+  <!-- Langkah 5 -->
+  <section class="step">
+    <h2><span class="n">5</span>Auto samain teks ke cahaya &amp; kualitas foto</h2>
+    <p class="d">Centang kotak ini biar teks otomatis menyamakan diri sama kualitas fotonya.</p>
+    <label class="check"><input type="checkbox" id="blend" checked> Samakan teks dengan foto</label>
+  </section>
+
+  <!-- Langkah 6 -->
+  <section class="step">
+    <h2><span class="n">6</span>Lengkungan teks</h2>
+    <p class="d">Atur ini kalo mau lengkungin teks biar ikutin foto.</p>
+    <div data-slider="tcur"></div>
+  </section>
+
+  <!-- Langkah 7 -->
+  <section class="step">
+    <h2><span class="n">7</span>Kesamaran teks</h2>
+    <p class="d">Kalo teks keliatan masih tebal, atur kesamaran teks di sini.</p>
+    <div data-slider="top"></div>
+  </section>
+
+  <!-- Langkah 8 -->
+  <section class="step">
+    <h2><span class="n">8</span>Blur teks</h2>
+    <p class="d">Kalo teks keliatan terlalu blur atau tajam, ilangin centang di langkah 5, terus atur blur teksnya manual di sini.</p>
+    <div data-slider="tbl"></div>
+  </section>
+
+  <!-- Opsi lanjutan (tertutup secara default) -->
+  <details>
+    <summary>Opsi lanjutan</summary>
+    <label class="check"><input type="checkbox" id="snap" checked> Snap (sudut, tengah, kelipatan 5°)</label>
+    <h3>Foto</h3>
+    <div data-slider="rot"></div>
+    <div data-slider="sw"></div>
+    <div data-slider="sh"></div>
+    <h3>Teks</h3>
+    <div data-slider="trot"></div>
+    <div data-slider="tsx"></div>
+    <div data-slider="tsy"></div>
+  </details>
+
+</aside>
+
+
+<!-- =====================================================
+     PREVIEW
+     ===================================================== -->
+<section id="preview">
+  <div id="zoombar">
+    <button id="zout" type="button" aria-label="Zoom out">−</button>
+    <button id="zfit" type="button" aria-label="Ukuran pas">100%</button>
+    <button id="zin"  type="button" aria-label="Zoom in">+</button>
+  </div>
+  <div id="mn">
+    <div id="stage">
+      <canvas id="cv"></canvas>
+      <svg id="ov"></svg>
+    </div>
+  </div>
+
+  <!-- Unduh: selalu terlihat di bawah preview -->
+  <div id="dlbar">
+    <button id="dl" class="primary" type="button">Download Hasilnya Disini</button>
+  </div>
+</section>
+
+
+<script>
+/* =====================================================
+   1. KONFIGURASI
+   ===================================================== */
+const CW = 1101, CH = 1692;       // 3,671 x 5,639 in @ 300 ppi
+const MARGIN = 130;               // ruang di sekitar kanvas untuk handle
+const PT_TO_PX = 300 / 72;        // pt -> px pada 300 ppi
+const $ = id => document.getElementById(id);
+const v = id => +$(id).value;
+
+// semua parameter slider: satu tempat untuk mengubah label, rentang, default
+const PARAMS = {
+  rot : {label:'Rotasi foto',        min:-180, max:180, step:.1, def:0,   unit:'°'},
+  scl : {label:'Skala foto',         min:30,   max:600, step:1,  def:100, unit:'%'},
+  sw  : {label:'Lebar foto',         min:30,   max:250, step:1,  def:100, unit:'%'},
+  sh  : {label:'Tinggi foto',        min:30,   max:250, step:1,  def:100, unit:'%'},
+  trot: {label:'Rotasi teks',        min:-180, max:180, step:.5, def:0,   unit:'°'},
+  tcur: {label:'Lengkungan teks',    min:-100, max:100, step:1,  def:0,   unit:''},
+  tsx : {label:'Stretch lebar teks', min:30,   max:300, step:1,  def:100, unit:'%'},
+  tsy : {label:'Stretch tinggi teks',min:30,   max:300, step:1,  def:100, unit:'%'},
+  top : {label:'Opacity teks',       min:0,    max:100, step:1,  def:100, unit:'%'},
+  tbl : {label:'Blur teks',          min:0,    max:100, step:.5, def:0,   unit:'%'}
+};
+const PHOTO_IDS = ['rot','scl','sw','sh'];
+
+
+/* =====================================================
+   2. STATE
+   ===================================================== */
+let sc = null, sw0 = 0, sh0 = 0, sd = null;   // foto sumber (canvas, ukuran, ImageData)
+let AN = null;                                // hasil analisis foto (garis tepi, ketajaman, noise)
+let Q = [];                                   // 4 sudut foto di kanvas (koreksi perspektif)
+const T = {x:CW/2, y:CH*.82, w:600};          // posisi & lebar grup teks
+const last = {rot:0, scl:100, sw:100, sh:100};
+let UI = true;                                // garis atur terlihat?
+let zm = 1, ps0 = .4, ps = .4, rs = .4;       // zoom, skala fit, skala tampilan, skala render
+let raf = 0, drag = null, pinch = null;
+const ptrs = new Map();
+
+
+/* =====================================================
+   3. UI PARAMETER (slider, reset, double-click)
+   ===================================================== */
+document.querySelectorAll('[data-slider]').forEach(box => {
+  const id = box.dataset.slider, p = PARAMS[id];
+  box.innerHTML =
+    `<div class="prow">
+       <label for="${id}">${p.label}</label>
+       <output id="${id}_v"></output>
+       <button type="button" class="rs" data-reset="${id}" title="Reset ${p.label}" aria-label="Reset ${p.label}">⟲</button>
+     </div>
+     <input type="range" id="${id}" min="${p.min}" max="${p.max}" step="${p.step}" value="${p.def}">`;
+});
+
+const wrap = a => a > 180 ? a - 360 : a < -180 ? a + 360 : a;
+function snapAngle(a){
+  if ($('snap').checked) { const r = Math.round(a/5)*5; if (Math.abs(a - r) < 1.5) return r; }
+  return a;
+}
+
+function onParam(id){
+  if (PHOTO_IDS.includes(id)) return applyPhotoParam(id);
+  if (id === 'trot') $(id).value = snapAngle(v(id));
+  show();
+}
+function resetParam(id){ $(id).value = PARAMS[id].def; onParam(id); }
+
+Object.keys(PARAMS).forEach(id => {
+  $(id).addEventListener('input',    () => onParam(id));
+  $(id).addEventListener('dblclick', () => resetParam(id));
+});
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-reset]');
+  if (b) resetParam(b.dataset.reset);
+});
+['nm','blend'].forEach(id => $(id).addEventListener('input', show));
+
+
+/* =====================================================
+   4. GEOMETRI FOTO
+   ===================================================== */
+const cen = () => [Q.reduce((a,p) => a + p[0], 0)/4, Q.reduce((a,p) => a + p[1], 0)/4];
+
+function xf(f){                                // transformasi relatif terhadap titik tengah
+  const [c0, c1] = cen();
+  Q = Q.map(p => f(p[0]-c0, p[1]-c1)).map(p => [p[0]+c0, p[1]+c1]);
+}
+function rotQ(deg){
+  const d = deg*Math.PI/180, c = Math.cos(d), s = Math.sin(d);
+  xf((x,y) => [x*c - y*s, x*s + y*c]);
+}
+function fit(){                                // foto menutupi kanvas penuh
+  if (!sc) return;
+  const k = Math.max(CW/sw0, CH/sh0), w = sw0*k, h = sh0*k, x = CW/2, y = CH/2;
+  Q = [[x-w/2,y-h/2],[x+w/2,y-h/2],[x+w/2,y+h/2],[x-w/2,y+h/2]];
+}
+function setPhotoSliders(o){
+  for (const k in o) $(k).value = o[k];
+  for (const k in last) last[k] = v(k);
+}
+function resetPhoto(){ setPhotoSliders({rot:0, scl:100, sw:100, sh:100}); fit(); show(); }
+
+function applyPhotoParam(id){
+  let val = v(id);
+  if (id === 'rot') { val = snapAngle(val); $('rot').value = val; rotQ(val - last.rot); }
+  else {
+    const r = val / last[id];
+    xf((x,y) => id === 'scl' ? [x*r, y*r] : id === 'sw' ? [x*r, y] : [x, y*r]);
+  }
+  last[id] = val;
+  show();
+}
+
+function homog(P, S){                          // homografi 4 titik (eliminasi Gauss)
+  const A = [];
+  for (let i = 0; i < 4; i++) {
+    const [x,y] = P[i], [u,w] = S[i];
+    A.push([x,y,1,0,0,0,-u*x,-u*y,u], [0,0,0,x,y,1,-w*x,-w*y,w]);
+  }
+  for (let c = 0; c < 8; c++) {
+    let m = c;
+    for (let r = c+1; r < 8; r++) if (Math.abs(A[r][c]) > Math.abs(A[m][c])) m = r;
+    [A[c], A[m]] = [A[m], A[c]];
+    for (let r = 0; r < 8; r++) if (r !== c) {
+      const f = A[r][c] / A[c][c];
+      for (let k = c; k < 9; k++) A[r][k] -= f*A[c][k];
+    }
+  }
+  return A.map((r,i) => r[8]/r[i]);
+}
+
+function inQuad(p){
+  let s = 0;
+  for (let i = 0; i < 4; i++) {
+    const a = Q[i], b = Q[(i+1)%4], c = (b[0]-a[0])*(p[1]-a[1]) - (b[1]-a[1])*(p[0]-a[0]);
+    if (!c) continue;
+    if (s && Math.sign(c) !== s) return false;
+    s = Math.sign(c);
+  }
+  return true;
+}
+function coverFix(){                           // perbesar seperlunya agar tidak ada sudut putih
+  const C = [[0,0],[CW,0],[CW,CH],[0,CH]], B = Q.map(p => [...p]);
+  for (let k = 1; k <= 8; k += .01) {
+    Q = B.map(p => [CW/2 + (p[0]-CW/2)*k, CH/2 + (p[1]-CH/2)*k]);
+    if (C.every(inQuad)) return k;
+  }
+  Q = B; return 1;
+}
+
+
+/* =====================================================
+   5. RENDER FOTO (dipakai sama persis oleh preview & ekspor)
+   ===================================================== */
+function drawPhoto(ctx, s){
+  const w = Math.round(CW*s), h = Math.round(CH*s);
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.fillStyle = '#fff'; ctx.fillRect(0,0,w,h);
+  if (!sd) return;
+
+  const H = homog(Q, [[0,0],[sw0,0],[sw0,sh0],[0,sh0]]);
+  const out = ctx.createImageData(w,h), o = out.data, d = sd.data, W = sw0, Hh = sh0;
+
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const X = (x+.5)/s, Y = (y+.5)/s, q = H[6]*X + H[7]*Y + 1;
+    const u = (H[0]*X + H[1]*Y + H[2])/q - .5, t = (H[3]*X + H[4]*Y + H[5])/q - .5, i = (y*w + x)*4;
+    o[i+3] = 255;
+    if (u < -.5 || t < -.5 || u > W-.5 || t > Hh-.5) { o[i] = o[i+1] = o[i+2] = 255; continue; }
+
+    const uu = Math.max(0,u), tt = Math.max(0,t);                 // interpolasi bilinear
+    const x0 = Math.min(W-1, uu|0), y0 = Math.min(Hh-1, tt|0);
+    const x1 = Math.min(W-1, x0+1), y1 = Math.min(Hh-1, y0+1), fx = uu-x0, fy = tt-y0;
+    for (let c = 0; c < 3; c++) {
+      const a = d[(y0*W+x0)*4+c], b = d[(y0*W+x1)*4+c], e = d[(y1*W+x0)*4+c], f = d[(y1*W+x1)*4+c];
+      o[i+c] = (a*(1-fx) + b*fx)*(1-fy) + (e*(1-fx) + f*fx)*fy;
+    }
+  }
+  ctx.putImageData(out, 0, 0);
+}
+
+
+/* =====================================================
+   6. RENDER TEKS (Arial Bold, 9,41 pt & 11,68 pt @ 300 ppi)
+   ===================================================== */
+const LINES = () => [
+  ['NAMA TAMBAHAN / ADDITIONAL NAME :', 9.41*PT_TO_PX,  -26],
+  [$('nm').value.toUpperCase(),         11.68*PT_TO_PX,  34]
+];
+const mk = (w,h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+
+function paintText(c, s, color){               // gambar grup teks (lengkung, rotasi, stretch)
+  c.save();
+  c.setTransform(s,0,0,s,0,0);
+  c.translate(T.x, T.y); c.rotate(v('trot')*Math.PI/180); c.scale(v('tsx')/100, v('tsy')/100);
+  c.fillStyle = color; c.textBaseline = 'alphabetic';
+
+  const L = LINES(); let W = 0;
+  L.forEach(l => { c.font = `bold ${l[1]}px Arial,Helvetica,sans-serif`; W = Math.max(W, c.measureText(l[0]).width); });
+  T.w = W;
+
+  const k = v('tcur'), R = k ? W/(k/100*Math.PI*.9) : 0;
+  L.forEach(([t, fs, dy]) => {
+    c.font = `bold ${fs}px Arial,Helvetica,sans-serif`;
+    if (!k) { c.fillText(t, -W/2, dy); return; }
+    for (let i = 0; i < t.length; i++) {
+      const cw = c.measureText(t[i]).width;
+      const sx = c.measureText(t.slice(0,i)).width + cw/2 - W/2, r = R - dy, a = sx/r;
+      c.save(); c.translate(r*Math.sin(a), R - r*Math.cos(a)); c.rotate(a);
+      c.fillText(t[i], -cw/2, 0); c.restore();
+    }
+  });
+  c.restore();
+}
+
+let L1 = null, L2 = null, NZ = null;
+function noiseTile(){                          // grain deterministik (hasil preview = ekspor)
+  if (NZ) return NZ;
+  NZ = mk(256,256);
+  const g = NZ.getContext('2d'), im = g.createImageData(256,256); let r = 12345;
+  for (let i = 0; i < 65536; i++) { r = (r*1664525 + 1013904223)>>>0; const n = r>>>24; im.data.set([n,n,n,255], i*4); }
+  g.putImageData(im,0,0); return NZ;
+}
+function localColor(ctx, s, w, h){             // warna rata-rata foto di bawah teks
+  const a = Math.PI/180*v('trot'), sx = v('tsx')/100, sy = v('tsy')/100, c = Math.cos(a), n = Math.sin(a), hw = T.w/2 + 12;
+  const P = [[-hw,-62],[hw,-62],[hw,68],[-hw,68]].map(([x,y]) => { x *= sx; y *= sy; return [(T.x + x*c - y*n)*s, (T.y + x*n + y*c)*s]; });
+  const x0 = Math.max(0, Math.floor(Math.min(...P.map(p => p[0])))), y0 = Math.max(0, Math.floor(Math.min(...P.map(p => p[1]))));
+  const x1 = Math.min(w, Math.ceil(Math.max(...P.map(p => p[0])))), y1 = Math.min(h, Math.ceil(Math.max(...P.map(p => p[1]))));
+  if (x1-x0 < 4 || y1-y0 < 4) return [220,220,220];
+  const D = ctx.getImageData(x0, y0, x1-x0, y1-y0).data; let R = 0, G = 0, B = 0; const N = D.length/4;
+  for (let i = 0; i < D.length; i += 4) { R += D[i]; G += D[i+1]; B += D[i+2]; }
+  return [R/N, G/N, B/N];
+}
+
+function drawText(ctx, s){
+  const w = Math.round(CW*s), h = Math.round(CH*s), op = v('top')/100, bl = v('tbl')*.2;   // blur 100% = 20 px
+  ctx.save(); ctx.setTransform(1,0,0,1,0,0);
+
+  if (!$('blend').checked) {                   // mode manual
+    ctx.globalAlpha = op;
+    if (bl > 0) ctx.filter = `blur(${bl*s}px)`;
+    paintText(ctx, s, '#111'); ctx.restore(); return;
+  }
+
+  // mode samakan dengan foto: tinta berwarna lokal + multiply + blur otomatis + grain
+  const [r,g,b] = localColor(ctx, s, w, h), sb = AN ? AN.sb : .5, ns = AN ? AN.ns : .15;
+  if (!L1 || L1.width !== w || L1.height !== h) { L1 = mk(w,h); L2 = mk(w,h); }
+
+  const g1 = L1.getContext('2d'); g1.setTransform(1,0,0,1,0,0); g1.clearRect(0,0,w,h);
+  paintText(g1, s, `rgb(${r*.22|0},${g*.22|0},${b*.22|0})`);
+  ctx.globalAlpha = op; ctx.globalCompositeOperation = 'multiply'; ctx.filter = `blur(${(bl+sb)*s}px)`;
+  ctx.drawImage(L1, 0, 0);
+
+  const g2 = L2.getContext('2d'); g2.setTransform(1,0,0,1,0,0); g2.globalCompositeOperation = 'source-over'; g2.clearRect(0,0,w,h);
+  g2.setTransform(s,0,0,s,0,0); g2.fillStyle = g2.createPattern(noiseTile(), 'repeat'); g2.fillRect(0,0,CW,CH);
+  g2.setTransform(1,0,0,1,0,0); g2.globalCompositeOperation = 'destination-in'; g2.drawImage(L1, 0, 0);
+  ctx.filter = 'none'; ctx.globalAlpha = op*ns; ctx.globalCompositeOperation = 'overlay'; ctx.drawImage(L2, 0, 0);
+  ctx.restore();
+}
+
+
+/* =====================================================
+   7. PREVIEW, ZOOM & OVERLAY
+   ===================================================== */
+const cv = $('cv'), pctx = cv.getContext('2d', {willReadFrequently:true}), ov = $('ov');
+
+function layout(){                             // hitung skala fit sesuai ukuran area preview
+  const mn = $('mn');
+  ps0 = Math.max(.12, Math.min((mn.clientHeight-16)/(CH+2*MARGIN), (mn.clientWidth-16)/(CW+2*MARGIN)));
+  applySize();
+}
+function applySize(){
+  ps = ps0*zm; rs = Math.min(ps, .6);          // resolusi render dibatasi agar tetap ringan
+  const st = $('stage'), tot = (CW+2*MARGIN)*ps;
+  st.style.width = tot+'px'; st.style.height = (CH+2*MARGIN)*ps+'px';
+  cv.width = Math.round(CW*rs); cv.height = Math.round(CH*rs);
+  cv.style.left = cv.style.top = MARGIN*ps+'px'; cv.style.width = CW*ps+'px'; cv.style.height = CH*ps+'px';
+  ov.setAttribute('width', tot); ov.setAttribute('height', (CH+2*MARGIN)*ps);
+  ov.setAttribute('viewBox', `${-MARGIN} ${-MARGIN} ${CW+2*MARGIN} ${CH+2*MARGIN}`);
+  $('zfit').textContent = Math.round(zm*100)+'%';
+  show();
+}
+
+const TH = () => {                             // posisi handle rotasi teks
+  const a = v('trot')*Math.PI/180, c = Math.cos(a), n = Math.sin(a), sy = v('tsy')/100;
+  return {top:[T.x + 62*sy*n, T.y - 62*sy*c], hd:[T.x + 117*sy*n, T.y - 117*sy*c]};
+};
+const PH = [CW/2, -65];                        // posisi handle rotasi foto
+
+function show(){
+  if (raf) return;
+  raf = requestAnimationFrame(() => {
+    raf = 0;
+    drawPhoto(pctx, rs); drawText(pctx, rs); pctx.filter = 'none';
+    for (const id in PARAMS) $(id+'_v').textContent = v(id) + PARAMS[id].unit;
+    ov.innerHTML = UI ? overlayMarkup() : '';
+  });
+}
+
+function overlayMarkup(){
+  const r = 9/ps, sw = 1.5/ps, sx = v('tsx')/100, sy = v('tsy')/100, th = TH();
+  const handle = (p, col, t) =>
+    `<circle cx="${p[0]}" cy="${p[1]}" r="${r*1.3}" fill="${col}" stroke="#000" stroke-width="${sw}"/>
+     <text x="${p[0]}" y="${p[1]}" text-anchor="middle" dominant-baseline="central" font-size="${r*1.7}" fill="#000">↻</text>`;
+  return (sd ? `<polygon points="${Q.map(p => p.join(',')).join(' ')}" fill="none" stroke="#e3b341" stroke-width="${2/ps}" stroke-dasharray="${8/ps} ${5/ps}"/>` : '')
+    + `<rect x="0" y="0" width="${CW}" height="${CH}" fill="none" stroke="#6b8afd" stroke-width="${1/ps}"/>`
+    + `<g transform="translate(${T.x} ${T.y}) rotate(${v('trot')}) scale(${sx} ${sy})">
+         <rect x="${-T.w/2-12}" y="-62" width="${T.w+24}" height="130" fill="none" stroke="#3fb8b0" stroke-width="${sw/Math.min(sx,sy)}" stroke-dasharray="${5/ps} ${4/ps}"/></g>`
+    + `<line x1="${th.top[0]}" y1="${th.top[1]}" x2="${th.hd[0]}" y2="${th.hd[1]}" stroke="#3fb8b0" stroke-width="${sw}"/>` + handle(th.hd, '#3fb8b0')
+    + (sd ? `<line x1="${CW/2}" y1="0" x2="${PH[0]}" y2="${PH[1]}" stroke="#e3b341" stroke-width="${sw}"/>` + handle(PH, '#e3b341')
+          + Q.map(p => `<circle cx="${p[0]}" cy="${p[1]}" r="${r}" fill="#e3b341" stroke="#000" stroke-width="${sw}"/>`).join('') : '');
+}
+
+function setUI(on){ if (UI !== on) { UI = on; show(); } }
+
+/* zoom: bergerak mengikuti titik (kursor / pusat pinch) */
+function zoomAt(nz, cx, cy){
+  nz = Math.min(4, Math.max(1, nz));
+  if (nz === zm) return;
+  const mn = $('mn'), r = $('stage').getBoundingClientRect(), lx = (cx - r.left)/ps, ly = (cy - r.top)/ps;
+  zm = nz; applySize();
+  const r2 = $('stage').getBoundingClientRect();
+  mn.scrollLeft += r2.left + lx*ps - cx; mn.scrollTop += r2.top + ly*ps - cy;
+}
+const zoomCenter = f => { const r = $('mn').getBoundingClientRect(); zoomAt(zm*f, r.left + r.width/2, r.top + r.height/2); };
+$('zin').onclick  = () => zoomCenter(1.25);
+$('zout').onclick = () => zoomCenter(1/1.25);
+$('zfit').onclick = () => { zm = 1; applySize(); $('mn').scrollLeft = $('mn').scrollTop = 0; };
+$('mn').addEventListener('wheel', e => { e.preventDefault(); zoomAt(zm*Math.exp(-e.deltaY*.0015), e.clientX, e.clientY); }, {passive:false});
+
+
+/* =====================================================
+   8. INTERAKSI PREVIEW (geser, rotasi, sudut, pinch)
+   ===================================================== */
+const pt = e => { const b = ov.getBoundingClientRect(); return [(e.clientX-b.left)/ps - MARGIN, (e.clientY-b.top)/ps - MARGIN]; };
+
+function hitText(x, y){
+  const dx = x - T.x, dy = y - T.y, a = -v('trot')*Math.PI/180, c = Math.cos(a), s = Math.sin(a);
+  const lx = (dx*c - dy*s)/(v('tsx')/100), ly = (dx*s + dy*c)/(v('tsy')/100);
+  return Math.abs(lx) < T.w/2 + 12 && ly > -62 && ly < 68;
+}
+
+// klik di luar preview => sembunyikan garis atur
+document.addEventListener('pointerdown', e => {
+  if (!$('stage').contains(e.target) && !$('zoombar').contains(e.target) && !$('dlbar').contains(e.target)) setUI(false);
+});
+
+ov.addEventListener('pointerdown', e => {
+  ptrs.set(e.pointerId, {x:e.clientX, y:e.clientY});
+  ov.setPointerCapture(e.pointerId);
+  if (ptrs.size === 2) {                       // dua jari: pinch zoom
+    const [a,b] = [...ptrs.values()];
+    pinch = {d:Math.hypot(a.x-b.x, a.y-b.y), cx:(a.x+b.x)/2, cy:(a.y+b.y)/2}; drag = null; return;
+  }
+
+  const [x,y] = pt(e), R = 18/ps, th = TH(); let hit = null;
+  if (UI) {                                    // handle hanya aktif saat garis atur terlihat
+    if (sd) Q.forEach((p,i) => { if (Math.hypot(p[0]-x, p[1]-y) < 16/ps) hit = {t:'c', i}; });
+    if (!hit && sd && Math.hypot(x-PH[0], y-PH[1]) < R) { const c = cen(); hit = {t:'rp', a:Math.atan2(y-c[1], x-c[0]), raw:0, base:v('rot')}; }
+    if (!hit && Math.hypot(x-th.hd[0], y-th.hd[1]) < R) hit = {t:'rt'};
+  }
+  if (!hit && hitText(x,y)) hit = {t:'t', ox:T.x-x, oy:T.y-y};
+  if (!hit && sd && x >= 0 && x <= CW && y >= 0 && y <= CH) hit = {t:'p', x, y};
+
+  drag = hit; setUI(!!hit);
+  if (hit) ov.style.cursor = 'grabbing';
+});
+
+ov.addEventListener('pointermove', e => {
+  if (ptrs.has(e.pointerId)) ptrs.set(e.pointerId, {x:e.clientX, y:e.clientY});
+
+  if (pinch && ptrs.size === 2) {              // zoom + geser dengan dua jari
+    const [a,b] = [...ptrs.values()], d = Math.hypot(a.x-b.x, a.y-b.y), cx = (a.x+b.x)/2, cy = (a.y+b.y)/2;
+    zoomAt(zm*d/pinch.d, cx, cy);
+    $('mn').scrollLeft -= cx - pinch.cx; $('mn').scrollTop -= cy - pinch.cy;
+    pinch = {d, cx, cy}; return;
+  }
+  if (!drag) return;
+
+  let [x,y] = pt(e); const sn = $('snap').checked, TOL = 12;
+  if (drag.t === 'c') {                        // titik sudut (perspektif) + snap ke sudut kanvas
+    if (sn) { [0,CW].forEach(a => { if (Math.abs(x-a) < TOL) x = a; }); [0,CH].forEach(a => { if (Math.abs(y-a) < TOL) y = a; }); }
+    Q[drag.i] = [x,y];
+  } else if (drag.t === 'rp') {                // rotasi foto
+    const c = cen(), a = Math.atan2(y-c[1], x-c[0]);
+    let d = a - drag.a; drag.a = a; d = Math.atan2(Math.sin(d), Math.cos(d)); drag.raw += d*180/Math.PI;
+    const nt = snapAngle(drag.base + drag.raw); rotQ(nt - last.rot);
+    const wv = wrap(nt); $('rot').value = wv; last.rot = wv;
+  } else if (drag.t === 'rt') {                // rotasi teks
+    $('trot').value = wrap(snapAngle(wrap(Math.atan2(y-T.y, x-T.x)*180/Math.PI + 90)));
+  } else if (drag.t === 't') {                 // pindah teks + snap ke tepi/tengah
+    let nx = x + drag.ox, ny = y + drag.oy;
+    if (sn) { [0,CW/2,CW].forEach(a => { if (Math.abs(nx-a) < TOL) nx = a; }); [0,CH/2,CH].forEach(a => { if (Math.abs(ny-a) < TOL) ny = a; }); }
+    T.x = nx; T.y = ny;
+  } else {                                     // geser foto
+    const dx = x - drag.x, dy = y - drag.y; Q = Q.map(p => [p[0]+dx, p[1]+dy]); drag.x = x; drag.y = y;
+  }
+  show();
+});
+
+const endPtr = e => { ptrs.delete(e.pointerId); if (ptrs.size < 2) pinch = null; if (!ptrs.size) { drag = null; ov.style.cursor = 'grab'; } };
+ov.addEventListener('pointerup', endPtr);
+ov.addEventListener('pointercancel', endPtr);
+
+
+/* =====================================================
+   9. UNGGAH FOTO
+   ===================================================== */
+function load(f){
+  if (!f || !f.type.startsWith('image/')) return;
+  const im = new Image();
+  im.onload = () => {
+    const k = Math.min(1, 2600/Math.max(im.width, im.height));    // batasi ukuran agar ringan
+    sc = mk(Math.round(im.width*k), Math.round(im.height*k)); sw0 = sc.width; sh0 = sc.height;
+    const g = sc.getContext('2d', {willReadFrequently:true}); g.drawImage(im, 0, 0, sw0, sh0);
+    sd = g.getImageData(0, 0, sw0, sh0); AN = analyze(); resetPhoto(); setUI(true);
+    URL.revokeObjectURL(im.src);
+  };
+  im.src = URL.createObjectURL(f);
+}
+const dz = $('drop');
+dz.onclick = () => $('file').click();
+dz.onkeydown = e => { if (e.key === 'Enter') $('file').click(); };
+$('file').onchange = e => load(e.target.files[0]);
+['dragenter','dragover'].forEach(n => addEventListener(n, e => { e.preventDefault(); dz.classList.add('on'); }));
+['dragleave','drop'].forEach(n => addEventListener(n, e => { e.preventDefault(); dz.classList.remove('on'); }));
+addEventListener('drop', e => load(e.dataTransfer.files[0]));
+$('reset').onclick = () => { if (sd) { resetPhoto(); $('msg').textContent = 'Foto direset.'; } };
+
+
+/* =====================================================
+   10. AUTO GEOMETRI (orientasi garis tepi Sobel pada foto asli)
+   ===================================================== */
+function analyze(){
+  const k = Math.min(1, 640/Math.max(sw0, sh0)), w = Math.round(sw0*k), h = Math.round(sh0*k), c = mk(w,h), g = c.getContext('2d');
+  g.drawImage(sc, 0, 0, w, h);
+  const D = g.getImageData(0,0,w,h).data, Y = new Float32Array(w*h), GX = new Float32Array(w*h), GY = new Float32Array(w*h), Mg = new Float32Array(w*h), lp = [];
+  for (let i = 0; i < w*h; i++) Y[i] = D[i*4]*.3 + D[i*4+1]*.59 + D[i*4+2]*.11;
+
+  for (let y = 1; y < h-1; y++) for (let x = 1; x < w-1; x++) {
+    const i = y*w + x;
+    GX[i] = Y[i-w+1] + 2*Y[i+1] + Y[i+w+1] - Y[i-w-1] - 2*Y[i-1] - Y[i+w-1];
+    GY[i] = Y[i+w-1] + 2*Y[i+w] + Y[i+w+1] - Y[i-w-1] - 2*Y[i-w] - Y[i-w+1];
+    Mg[i] = Math.hypot(GX[i], GY[i])/4;
+    if (!((x+y)%3)) lp.push(Math.abs(4*Y[i] - Y[i-1] - Y[i+1] - Y[i-w] - Y[i+w]));   // estimasi noise
+  }
+  const S = Float32Array.from(Mg).sort(), p = q => S[Math.floor(q*(S.length-1))], thr = Math.max(12, p(.9)), E = [];
+  for (let i = 0; i < w*h; i++) if (Mg[i] >= thr) {
+    let d = Math.atan2(-GX[i], GY[i])*180/Math.PI; if (d > 90) d -= 180; if (d <= -90) d += 180;
+    const hz = Math.abs(d) < 45;               // hz = garis mendekati horizontal
+    E.push({x:(i%w)/k, y:((i/w)|0)/k, m:Mg[i], t:hz ? d : d > 0 ? d-90 : d+90, hz});
+  }
+  lp.sort((a,b) => a-b);
+  return {E, sb:Math.min(1.4, Math.max(.25, 1.6 - p(.95)/90)), ns:Math.min(.5, (lp[lp.length>>1] || 0)/20)};
+}
+
+function peak(L, lo, hi){                      // sudut dominan (histogram berbobot, dihaluskan)
+  const n = Math.round((hi-lo)*2)+1, b = new Float32Array(n); let tot = 0;
+  for (const e of L) { const i = Math.round((e.t-lo)*2); if (i >= 0 && i < n) { b[i] += e.m; tot += e.m; } }
+  if (!tot) return null;
+  let bi = 0, bs = -1;
+  for (let i = 0; i < n; i++) { let s = 0; for (let j = -3; j <= 3; j++) s += b[Math.min(n-1, Math.max(0, i+j))]*(4-Math.abs(j)); if (s > bs) { bs = s; bi = i; } }
+  return {a:lo + bi/2, f:bs/tot};
+}
+const LI = (x,y,a) => [x, y, Math.cos(a*Math.PI/180), Math.sin(a*Math.PI/180)];
+function inter(A, B){
+  const den = A[2]*B[3] - A[3]*B[2]; if (Math.abs(den) < 1e-3) return null;
+  const s = ((B[0]-A[0])*B[3] - (B[1]-A[1])*B[2])/den; return [A[0]+s*A[2], A[1]+s*A[3]];
+}
+
+function keystone(E){                          // koreksi horizontal, vertikal, perspektif
+  const W = sw0, H = sh0, f = fn => E.filter(fn);
+  const ht = peak(f(e => e.hz  && e.y <  H/2), -30, 30), hb = peak(f(e => e.hz  && e.y >= H/2), -30, 30);
+  const vl = peak(f(e => !e.hz && e.x <  W/2), -30, 30), vr = peak(f(e => !e.hz && e.x >= W/2), -30, 30);
+  if (!(ht && hb && vl && vr) || Math.abs(ht.a-hb.a) > 15 || Math.abs(vl.a-vr.a) > 15) return null;
+
+  const tp = LI(W/2,0,ht.a), bt = LI(W/2,H,hb.a), lf = LI(0,H/2,vl.a+90), rt = LI(W,H/2,vr.a+90);
+  const P = [inter(tp,lf), inter(tp,rt), inter(bt,rt), inter(bt,lf)]; if (P.some(p => !p)) return null;
+  const h = homog(P, [[0,0],[CW,0],[CW,CH],[0,CH]]);
+  const mp = ([x,y]) => { const q = h[6]*x + h[7]*y + 1; return [(h[0]*x + h[1]*y + h[2])/q, (h[3]*x + h[4]*y + h[5])/q]; };
+  const R = [[0,0],[W,0],[W,H],[0,H]].map(mp);
+  if (R.some(p => !isFinite(p[0]+p[1]) || Math.abs(p[0]) > 8*CW || Math.abs(p[1]) > 8*CH)) return null;
+  return {R, txt:`atas ${ht.a}°, bawah ${hb.a}°, kiri ${vl.a}°, kanan ${vr.a}°`};
+}
+
+function straighten(){                         // luruskan kemiringan saja
+  const p = peak(AN.E, -45, 45); if (!p) return null;
+  resetPhoto(); rotQ(-p.a); const k = coverFix();
+  setPhotoSliders({rot:+(-p.a).toFixed(1), scl:Math.min(600, Math.round(k*100)), sw:100, sh:100}); show();
+  return p.a;
+}
+$('auto').onclick = () => {
+  if (!sd) return;
+  const a = straighten();
+  $('msg').textContent = a == null ? 'Garis tepi tidak ditemukan. Luruskan manual.' : `Kemiringan terdeteksi ${a.toFixed(1)}°, foto diluruskan.`;
+};
+$('total').onclick = () => {
+  if (!sd) return;
+  resetPhoto();
+  const r = keystone(AN.E);
+  if (r) {
+    Q = r.R; const k = coverFix();
+    setPhotoSliders({rot:0, scl:Math.min(600, Math.round(k*100)), sw:100, sh:100}); show();
+    $('msg').textContent = `Horizontal, vertikal & perspektif dikoreksi (${r.txt}). Sempurnakan lewat titik kuning bila perlu.`;
+  } else {
+    const a = straighten();
+    $('msg').textContent = a == null ? 'Garis tepi tidak ditemukan. Atur manual.' : `Perspektif tidak terdeteksi jelas; hanya diluruskan ${a.toFixed(1)}°.`;
+  }
+};
+
+
+/* =====================================================
+   11. EKSPOR JPEG 300 PPI
+   ===================================================== */
+$('dl').onclick = () => {
+  const c = mk(CW, CH), g = c.getContext('2d', {willReadFrequently:true});
+  drawPhoto(g, 1); drawText(g, 1);
+  c.toBlob(async b => {
+    const u = new Uint8Array(await b.arrayBuffer());
+    if (u[2] === 0xFF && u[3] === 0xE0 && u[6] === 0x4A) { u[13] = 1; u[14] = 1; u[15] = 0x2C; u[16] = 1; u[17] = 0x2C; }   // JFIF: 300 dpi
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([u], {type:'image/jpeg'})); a.download = 'foto-3.671x5.639in-300ppi.jpg'; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  }, 'image/jpeg', .95);
+};
+
+
+/* =====================================================
+   12. TEMA TERANG / GELAP (default: terang)
+   ===================================================== */
+function setTheme(t){
+  document.documentElement.dataset.theme = t;
+  $('theme').textContent = t === 'dark' ? 'Mode terang' : 'Mode gelap';
+  try { localStorage.setItem('theme', t); } catch (e) {}
+}
+$('theme').onclick = () => setTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
+
+
+/* =====================================================
+   13. INISIALISASI
+   ===================================================== */
+let saved = null; try { saved = localStorage.getItem('theme'); } catch (e) {}
+setTheme(saved === 'dark' ? 'dark' : 'light');
+new ResizeObserver(layout).observe($('mn'));
+layout();
+</script>
+</body>
+</html>
