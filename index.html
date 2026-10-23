@@ -68,9 +68,12 @@ button{
   background:var(--pn2); color:var(--tx); cursor:pointer;
 }
 button:hover{border-color:var(--ac)}
+button:disabled{opacity:.45; cursor:not-allowed}
+button:disabled:hover{border-color:var(--bd)}
 button:focus-visible,input:focus-visible,summary:focus-visible{outline:2px solid var(--ac); outline-offset:2px}
 .row{display:flex; gap:6px; flex-wrap:wrap}
 .row button{flex:1}
+.row.mt{margin-top:10px}
 button.primary{width:100%; margin-top:16px; padding:12px; font-weight:600; background:var(--ac); color:var(--acx); border-color:var(--ac)}
 input[type=text]{
   width:100%; padding:9px; border:1px solid var(--bd); border-radius:6px;
@@ -162,6 +165,11 @@ details h3{margin:12px 0 0; font-size:12.5px; color:var(--ac)}
     <h2><span class="n">3</span>Skala foto / crop</h2>
     <p class="d">Atur skala buat crop sisi foto yang gak terpakai.</p>
     <div data-slider="scl"></div>
+    <div class="row mt">
+      <button id="crop" type="button" disabled>Crop</button>
+      <button id="uncrop" type="button" disabled>Undo crop</button>
+    </div>
+    <p class="msg" id="cropmsg">Crop membuang bagian foto yang tidak terlihat di preview.</p>
   </section>
 
   <!-- Langkah 4 -->
@@ -251,11 +259,11 @@ const v = id => +$(id).value;
 
 // semua parameter slider: satu tempat untuk mengubah label, rentang, default
 const PARAMS = {
-  rot : {label:'Rotasi foto',        min:-180, max:180, step:.05, def:0,   unit:'°'},
+  rot : {label:'Rotasi foto',        min:-180, max:180, step:.1, def:0,   unit:'°'},
   scl : {label:'Skala foto',         min:30,   max:600, step:1,  def:100, unit:'%'},
   sw  : {label:'Lebar foto',         min:30,   max:250, step:1,  def:100, unit:'%'},
   sh  : {label:'Tinggi foto',        min:30,   max:250, step:1,  def:100, unit:'%'},
-  trot: {label:'Rotasi teks',        min:-180, max:180, step:.05, def:0,   unit:'°'},
+  trot: {label:'Rotasi teks',        min:-180, max:180, step:.5, def:0,   unit:'°'},
   tcur: {label:'Lengkungan teks',    min:-100, max:100, step:1,  def:0,   unit:''},
   tsx : {label:'Stretch lebar teks', min:30,   max:300, step:1,  def:100, unit:'%'},
   tsy : {label:'Stretch tinggi teks',min:30,   max:300, step:1,  def:100, unit:'%'},
@@ -277,6 +285,7 @@ let UI = true;                                // garis atur terlihat?
 let zm = 1, ps0 = .4, ps = .4, rs = .4;       // zoom, skala fit, skala tampilan, skala render
 let raf = 0, drag = null, pinch = null;
 const ptrs = new Map();
+let srcCounter = 0;                           // id unik tiap sumber foto (untuk cache)
 
 
 /* =====================================================
@@ -295,7 +304,7 @@ document.querySelectorAll('[data-slider]').forEach(box => {
 
 const wrap = a => a > 180 ? a - 360 : a < -180 ? a + 360 : a;
 function snapAngle(a){
-  if ($('snap').checked) { const r = Math.round(a/5)*5; if (Math.abs(a - r) < 0.4) return r; }
+  if ($('snap').checked) { const r = Math.round(a/5)*5; if (Math.abs(a - r) < 1.5) return r; }
   return a;
 }
 
@@ -349,6 +358,7 @@ function applyPhotoParam(id){
     xf((x,y) => id === 'scl' ? [x*r, y*r] : id === 'sw' ? [x*r, y] : [x, y*r]);
   }
   last[id] = val;
+  fastMode();
   show();
 }
 
@@ -393,18 +403,36 @@ function coverFix(){                           // perbesar seperlunya agar tidak
 /* =====================================================
    5. RENDER FOTO (dipakai sama persis oleh preview & ekspor)
    ===================================================== */
+let OUT = null, PC = null, PCkey = '';
+
+function buildMips(src, data){                 // piramida 1/1, 1/2, 1/4, 1/8: sampling cepat & halus
+  const m = [{d:data, w:src.width, h:src.height}]; let cur = src;
+  for (let l = 1; l <= 3; l++) {
+    const w = Math.max(1, Math.round(cur.width/2)), h = Math.max(1, Math.round(cur.height/2));
+    const c = mk(w,h), g = c.getContext('2d', {willReadFrequently:true});
+    g.drawImage(cur, 0, 0, w, h); m.push({d:g.getImageData(0,0,w,h).data, w, h}); cur = c;
+  }
+  return m;
+}
+
 function drawPhoto(ctx, s){
   const w = Math.round(CW*s), h = Math.round(CH*s);
   ctx.setTransform(1,0,0,1,0,0);
   ctx.fillStyle = '#fff'; ctx.fillRect(0,0,w,h);
   if (!sd) return;
 
+  // pilih level mipmap sesuai rasio sumber : tujuan
+  const ratio = Math.sqrt(sw0*sh0/(quadArea() || 1))/s;
+  const lv = Math.max(0, Math.min(sd._m.length-1, Math.floor(Math.log2(Math.max(1, ratio || 1)))));
+  const M = sd._m[lv], d = M.d, W = M.w, Hh = M.h, kx = W/sw0, ky = Hh/sh0;
+
   const H = homog(Q, [[0,0],[sw0,0],[sw0,sh0],[0,sh0]]);
-  const out = ctx.createImageData(w,h), o = out.data, d = sd.data, W = sw0, Hh = sh0;
+  if (!OUT || OUT.width !== w || OUT.height !== h) OUT = ctx.createImageData(w,h);
+  const o = OUT.data;
 
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
     const X = (x+.5)/s, Y = (y+.5)/s, q = H[6]*X + H[7]*Y + 1;
-    const u = (H[0]*X + H[1]*Y + H[2])/q - .5, t = (H[3]*X + H[4]*Y + H[5])/q - .5, i = (y*w + x)*4;
+    const u = (H[0]*X + H[1]*Y + H[2])/q*kx - .5, t = (H[3]*X + H[4]*Y + H[5])/q*ky - .5, i = (y*w + x)*4;
     o[i+3] = 255;
     if (u < -.5 || t < -.5 || u > W-.5 || t > Hh-.5) { o[i] = o[i+1] = o[i+2] = 255; continue; }
 
@@ -416,7 +444,17 @@ function drawPhoto(ctx, s){
       o[i+c] = (a*(1-fx) + b*fx)*(1-fy) + (e*(1-fx) + f*fx)*fy;
     }
   }
-  ctx.putImageData(out, 0, 0);
+  ctx.putImageData(OUT, 0, 0);
+}
+
+// preview: hasil warp disimpan; hanya dihitung ulang jika foto/sudut/ukuran berubah
+function drawPhotoCached(ctx, s){
+  const w = Math.round(CW*s), h = Math.round(CH*s);
+  const key = s + '|' + (sd ? sd._id : 0) + '|' + Q.map(p => p[0].toFixed(2) + ',' + p[1].toFixed(2)).join(';');
+  if (!PC || PC.width !== w || PC.height !== h) { PC = mk(w,h); PC.getContext('2d', {willReadFrequently:true}); PCkey = ''; }
+  if (key !== PCkey) { drawPhoto(PC.getContext('2d'), s); PCkey = key; }
+  ctx.setTransform(1,0,0,1,0,0); ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(PC, 0, 0, ctx.canvas.width, ctx.canvas.height);
 }
 
 
@@ -461,11 +499,25 @@ function noiseTile(){                          // grain deterministik (hasil pre
   for (let i = 0; i < 65536; i++) { r = (r*1664525 + 1013904223)>>>0; const n = r>>>24; im.data.set([n,n,n,255], i*4); }
   g.putImageData(im,0,0); return NZ;
 }
-function localColor(ctx, s, w, h){             // warna rata-rata foto di bawah teks
+const MC = mk(1,1).getContext('2d');
+function measure(){                            // lebar grup teks (dipakai kotak area teks)
+  let W = 0;
+  LINES().forEach(l => { MC.font = `bold ${l[1]}px Arial,Helvetica,sans-serif`; W = Math.max(W, MC.measureText(l[0]).width); });
+  T.w = W;
+}
+
+function textBox(s, w, h, pad, tight){         // kotak (px) pengelilingi teks; penuh jika melengkung (kecuali tight)
+  if (!tight && v('tcur')) return [0, 0, w, h];
   const a = Math.PI/180*v('trot'), sx = v('tsx')/100, sy = v('tsy')/100, c = Math.cos(a), n = Math.sin(a), hw = T.w/2 + 12;
   const P = [[-hw,-62],[hw,-62],[hw,68],[-hw,68]].map(([x,y]) => { x *= sx; y *= sy; return [(T.x + x*c - y*n)*s, (T.y + x*n + y*c)*s]; });
-  const x0 = Math.max(0, Math.floor(Math.min(...P.map(p => p[0])))), y0 = Math.max(0, Math.floor(Math.min(...P.map(p => p[1]))));
-  const x1 = Math.min(w, Math.ceil(Math.max(...P.map(p => p[0])))), y1 = Math.min(h, Math.ceil(Math.max(...P.map(p => p[1]))));
+  return [
+    Math.max(0, Math.floor(Math.min(...P.map(p => p[0])) - pad)), Math.max(0, Math.floor(Math.min(...P.map(p => p[1])) - pad)),
+    Math.min(w, Math.ceil(Math.max(...P.map(p => p[0])) + pad)),  Math.min(h, Math.ceil(Math.max(...P.map(p => p[1])) + pad))
+  ];
+}
+
+function localColor(ctx, s, w, h){             // warna rata-rata foto di bawah teks
+  const [x0,y0,x1,y1] = textBox(s, w, h, 0, true);
   if (x1-x0 < 4 || y1-y0 < 4) return [220,220,220];
   const D = ctx.getImageData(x0, y0, x1-x0, y1-y0).data; let R = 0, G = 0, B = 0; const N = D.length/4;
   for (let i = 0; i < D.length; i += 4) { R += D[i]; G += D[i+1]; B += D[i+2]; }
@@ -474,6 +526,7 @@ function localColor(ctx, s, w, h){             // warna rata-rata foto di bawah 
 
 function drawText(ctx, s){
   const w = Math.round(CW*s), h = Math.round(CH*s), op = v('top')/100, bl = v('tbl')*.2;   // blur 100% = 20 px
+  measure();
   ctx.save(); ctx.setTransform(1,0,0,1,0,0);
 
   if (!$('blend').checked) {                   // mode manual
@@ -482,19 +535,26 @@ function drawText(ctx, s){
     paintText(ctx, s, '#111'); ctx.restore(); return;
   }
 
-  // mode samakan dengan foto: tinta berwarna lokal + multiply + blur otomatis + grain
+  // mode samakan dengan foto: tinta berwarna lokal + multiply + blur otomatis + grain (hanya di area teks)
   const [r,g,b] = localColor(ctx, s, w, h), sb = AN ? AN.sb : .5, ns = AN ? AN.ns : .15;
-  if (!L1 || L1.width !== w || L1.height !== h) { L1 = mk(w,h); L2 = mk(w,h); }
+  const [x0,y0,x1,y1] = textBox(s, w, h, Math.ceil((bl+sb)*s*3) + 4), bw = x1-x0, bh = y1-y0;
+  if (bw <= 0 || bh <= 0) { ctx.restore(); return; }
+  if (!L1 || L1.width !== w || L1.height !== h) {
+    L1 = mk(w,h); L2 = mk(w,h);
+    L1.getContext('2d', {willReadFrequently:true}); L2.getContext('2d', {willReadFrequently:true});
+  }
 
-  const g1 = L1.getContext('2d'); g1.setTransform(1,0,0,1,0,0); g1.clearRect(0,0,w,h);
+  const g1 = L1.getContext('2d'); g1.setTransform(1,0,0,1,0,0); g1.clearRect(x0,y0,bw,bh);
   paintText(g1, s, `rgb(${r*.22|0},${g*.22|0},${b*.22|0})`);
   ctx.globalAlpha = op; ctx.globalCompositeOperation = 'multiply'; ctx.filter = `blur(${(bl+sb)*s}px)`;
-  ctx.drawImage(L1, 0, 0);
+  ctx.drawImage(L1, x0, y0, bw, bh, x0, y0, bw, bh);
 
-  const g2 = L2.getContext('2d'); g2.setTransform(1,0,0,1,0,0); g2.globalCompositeOperation = 'source-over'; g2.clearRect(0,0,w,h);
-  g2.setTransform(s,0,0,s,0,0); g2.fillStyle = g2.createPattern(noiseTile(), 'repeat'); g2.fillRect(0,0,CW,CH);
-  g2.setTransform(1,0,0,1,0,0); g2.globalCompositeOperation = 'destination-in'; g2.drawImage(L1, 0, 0);
-  ctx.filter = 'none'; ctx.globalAlpha = op*ns; ctx.globalCompositeOperation = 'overlay'; ctx.drawImage(L2, 0, 0);
+  const g2 = L2.getContext('2d');
+  g2.save(); g2.setTransform(1,0,0,1,0,0); g2.beginPath(); g2.rect(x0,y0,bw,bh); g2.clip(); g2.clearRect(x0,y0,bw,bh);
+  g2.setTransform(s,0,0,s,0,0); g2.fillStyle = g2.createPattern(noiseTile(), 'repeat'); g2.fillRect(x0/s, y0/s, bw/s, bh/s);
+  g2.setTransform(1,0,0,1,0,0); g2.globalCompositeOperation = 'destination-in'; g2.drawImage(L1, 0, 0); g2.restore();
+  ctx.filter = 'none'; ctx.globalAlpha = op*ns; ctx.globalCompositeOperation = 'overlay';
+  ctx.drawImage(L2, x0, y0, bw, bh, x0, y0, bw, bh);
   ctx.restore();
 }
 
@@ -527,11 +587,17 @@ const TH = () => {                             // posisi handle rotasi teks
 };
 const PH = [CW/2, -65];                        // posisi handle rotasi foto
 
+let FAST = false, fastTimer = 0;               // saat foto digeser/diputar: render setengah resolusi, lalu tajam lagi
+function fastMode(){
+  FAST = true; clearTimeout(fastTimer);
+  fastTimer = setTimeout(() => { FAST = false; show(); }, 160);
+}
+
 function show(){
   if (raf) return;
   raf = requestAnimationFrame(() => {
     raf = 0;
-    drawPhoto(pctx, rs); drawText(pctx, rs); pctx.filter = 'none';
+    drawPhotoCached(pctx, FAST ? rs*.5 : rs); drawText(pctx, rs); pctx.filter = 'none';
     for (const id in PARAMS) $(id+'_v').textContent = v(id) + PARAMS[id].unit;
     ov.innerHTML = UI ? overlayMarkup() : '';
   });
@@ -597,7 +663,7 @@ ov.addEventListener('pointerdown', e => {
   if (UI) {                                    // handle hanya aktif saat garis atur terlihat
     if (sd) Q.forEach((p,i) => { if (Math.hypot(p[0]-x, p[1]-y) < 16/ps) hit = {t:'c', i}; });
     if (!hit && sd && Math.hypot(x-PH[0], y-PH[1]) < R) { const c = cen(); hit = {t:'rp', a:Math.atan2(y-c[1], x-c[0]), raw:0, base:v('rot')}; }
-    if (!hit && Math.hypot(x-th.hd[0], y-th.hd[1]) < R) hit = {t:'rt', a:Math.atan2(y-T.y, x-T.x), raw:0, base:v('trot')};
+    if (!hit && Math.hypot(x-th.hd[0], y-th.hd[1]) < R) hit = {t:'rt'};
   }
   if (!hit && hitText(x,y)) hit = {t:'t', ox:T.x-x, oy:T.y-y};
   if (!hit && sd && x >= 0 && x <= CW && y >= 0 && y <= CH) hit = {t:'p', x, y};
@@ -623,17 +689,11 @@ ov.addEventListener('pointermove', e => {
     Q[drag.i] = [x,y];
   } else if (drag.t === 'rp') {                // rotasi foto
     const c = cen(), a = Math.atan2(y-c[1], x-c[0]);
-    let d = a - drag.a; drag.a = a; d = Math.atan2(Math.sin(d), Math.cos(d)); drag.raw += d*180/Math.PI*(e.shiftKey ? .25 : 1);
-     
+    let d = a - drag.a; drag.a = a; d = Math.atan2(Math.sin(d), Math.cos(d)); drag.raw += d*180/Math.PI;
     const nt = snapAngle(drag.base + drag.raw); rotQ(nt - last.rot);
     const wv = wrap(nt); $('rot').value = wv; last.rot = wv;
-  
-  } else if (drag.t === 'rt') {
-    const a = Math.atan2(y-T.y, x-T.x);
-    let d = a - drag.a; drag.a = a; d = Math.atan2(Math.sin(d), Math.cos(d));
-    drag.raw += d*180/Math.PI*(e.shiftKey ? .25 : 1);
-    $('trot').value = wrap(snapAngle(drag.base + drag.raw));
-     
+  } else if (drag.t === 'rt') {                // rotasi teks
+    $('trot').value = wrap(snapAngle(wrap(Math.atan2(y-T.y, x-T.x)*180/Math.PI + 90)));
   } else if (drag.t === 't') {                 // pindah teks + snap ke tepi/tengah
     let nx = x + drag.ox, ny = y + drag.oy;
     if (sn) { [0,CW/2,CW].forEach(a => { if (Math.abs(nx-a) < TOL) nx = a; }); [0,CH/2,CH].forEach(a => { if (Math.abs(ny-a) < TOL) ny = a; }); }
@@ -641,6 +701,7 @@ ov.addEventListener('pointermove', e => {
   } else {                                     // geser foto
     const dx = x - drag.x, dy = y - drag.y; Q = Q.map(p => [p[0]+dx, p[1]+dy]); drag.x = x; drag.y = y;
   }
+  if (drag.t === 'c' || drag.t === 'rp' || drag.t === 'p') fastMode();
   show();
 });
 
@@ -659,7 +720,8 @@ function load(f){
     const k = Math.min(1, 2600/Math.max(im.width, im.height));    // batasi ukuran agar ringan
     sc = mk(Math.round(im.width*k), Math.round(im.height*k)); sw0 = sc.width; sh0 = sc.height;
     const g = sc.getContext('2d', {willReadFrequently:true}); g.drawImage(im, 0, 0, sw0, sh0);
-    sd = g.getImageData(0, 0, sw0, sh0); AN = analyze(); resetPhoto(); setUI(true);
+    sd = g.getImageData(0, 0, sw0, sh0); sd._m = buildMips(sc, sd.data); sd._id = ++srcCounter; AN = analyze(); resetPhoto(); setUI(true);
+    cropStack.length = 0; updateCropButtons();
     URL.revokeObjectURL(im.src);
   };
   im.src = URL.createObjectURL(f);
@@ -675,7 +737,55 @@ $('reset').onclick = () => { if (sd) { resetPhoto(); $('msg').textContent = 'Fot
 
 
 /* =====================================================
-   10. AUTO GEOMETRI (orientasi garis tepi Sobel pada foto asli)
+   10. CROP & UNDO CROP
+   ===================================================== */
+const cropStack = [];                          // riwayat sebelum crop (maks. 5)
+
+function updateCropButtons(){
+  $('crop').disabled   = !sd;
+  $('uncrop').disabled = !cropStack.length;
+}
+
+function quadArea(){                           // luas segiempat foto di kanvas (rumus shoelace)
+  let a = 0;
+  for (let i = 0; i < 4; i++) { const p = Q[i], q = Q[(i+1)%4]; a += p[0]*q[1] - q[0]*p[1]; }
+  return Math.abs(a)/2;
+}
+
+function doCrop(){
+  if (!sd) return;
+  // simpan kondisi sebelum crop agar bisa di-undo
+  cropStack.push({sc, sw0, sh0, sd, AN, Q:Q.map(p => [...p]), sl:{rot:v('rot'), scl:v('scl'), sw:v('sw'), sh:v('sh')}});
+  if (cropStack.length > 5) cropStack.shift();
+
+  // render bagian yang terlihat di preview menjadi foto baru (detail asli dipertahankan, maks. 2x)
+  const s = Math.min(2, Math.max(1, Math.sqrt(sw0*sh0/quadArea())));
+  const c = mk(Math.round(CW*s), Math.round(CH*s));
+  drawPhoto(c.getContext('2d', {willReadFrequently:true}), s);
+
+  sc = c; sw0 = c.width; sh0 = c.height;
+  sd = c.getContext('2d').getImageData(0, 0, sw0, sh0); sd._m = buildMips(sc, sd.data); sd._id = ++srcCounter;
+  AN = analyze();
+  Q = [[0,0],[CW,0],[CW,CH],[0,CH]];           // 4 titik & garis atur menyesuaikan hasil crop
+  setPhotoSliders({rot:0, scl:100, sw:100, sh:100});
+  setUI(true); show(); updateCropButtons();
+  $('cropmsg').textContent = 'Foto di-crop: bagian yang tidak terlihat sudah dibuang. Klik “Undo crop” untuk membatalkan.';
+}
+
+function undoCrop(){
+  const h = cropStack.pop(); if (!h) return;
+  ({sc, sw0, sh0, sd, AN} = h);
+  Q = h.Q; setPhotoSliders(h.sl);
+  setUI(true); show(); updateCropButtons();
+  $('cropmsg').textContent = 'Crop dibatalkan.' + (cropStack.length ? ' Masih ada ' + cropStack.length + ' crop yang bisa di-undo.' : '');
+}
+
+$('crop').onclick = () => { $('cropmsg').textContent = 'Memproses crop…'; setTimeout(doCrop, 30); };
+$('uncrop').onclick = undoCrop;
+
+
+/* =====================================================
+   11. AUTO GEOMETRI (orientasi garis tepi Sobel pada foto asli)
    ===================================================== */
 function analyze(){
   const k = Math.min(1, 640/Math.max(sw0, sh0)), w = Math.round(sw0*k), h = Math.round(sh0*k), c = mk(w,h), g = c.getContext('2d');
@@ -756,7 +866,7 @@ $('total').onclick = () => {
 
 
 /* =====================================================
-   11. EKSPOR JPEG 300 PPI
+   12. EKSPOR JPEG 300 PPI
    ===================================================== */
 $('dl').onclick = () => {
   const c = mk(CW, CH), g = c.getContext('2d', {willReadFrequently:true});
@@ -772,7 +882,7 @@ $('dl').onclick = () => {
 
 
 /* =====================================================
-   12. TEMA TERANG / GELAP (default: terang)
+   13. TEMA TERANG / GELAP (default: terang)
    ===================================================== */
 function setTheme(t){
   document.documentElement.dataset.theme = t;
@@ -783,11 +893,12 @@ $('theme').onclick = () => setTheme(document.documentElement.dataset.theme === '
 
 
 /* =====================================================
-   13. INISIALISASI
+   14. INISIALISASI
    ===================================================== */
 let saved = null; try { saved = localStorage.getItem('theme'); } catch (e) {}
 setTheme(saved === 'dark' ? 'dark' : 'light');
 new ResizeObserver(layout).observe($('mn'));
+updateCropButtons();
 layout();
 </script>
 </body>
