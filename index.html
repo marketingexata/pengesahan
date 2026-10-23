@@ -251,11 +251,11 @@ const v = id => +$(id).value;
 
 // semua parameter slider: satu tempat untuk mengubah label, rentang, default
 const PARAMS = {
-  rot : {label:'Rotasi foto',        min:-180, max:180, step:.1, def:0,   unit:'°'},
+  rot : {label:'Rotasi foto',        min:-180, max:180, step:.05, def:0,   unit:'°'},
   scl : {label:'Skala foto',         min:30,   max:600, step:1,  def:100, unit:'%'},
   sw  : {label:'Lebar foto',         min:30,   max:250, step:1,  def:100, unit:'%'},
   sh  : {label:'Tinggi foto',        min:30,   max:250, step:1,  def:100, unit:'%'},
-  trot: {label:'Rotasi teks',        min:-180, max:180, step:.5, def:0,   unit:'°'},
+  trot: {label:'Rotasi teks',        min:-180, max:180, step:.05, def:0,   unit:'°'},
   tcur: {label:'Lengkungan teks',    min:-100, max:100, step:1,  def:0,   unit:''},
   tsx : {label:'Stretch lebar teks', min:30,   max:300, step:1,  def:100, unit:'%'},
   tsy : {label:'Stretch tinggi teks',min:30,   max:300, step:1,  def:100, unit:'%'},
@@ -295,7 +295,7 @@ document.querySelectorAll('[data-slider]').forEach(box => {
 
 const wrap = a => a > 180 ? a - 360 : a < -180 ? a + 360 : a;
 function snapAngle(a){
-  if ($('snap').checked) { const r = Math.round(a/5)*5; if (Math.abs(a - r) < 1.5) return r; }
+  if ($('snap').checked) { const r = Math.round(a/5)*5; if (Math.abs(a - r) < 0.4) return r; }
   return a;
 }
 
@@ -597,7 +597,7 @@ ov.addEventListener('pointerdown', e => {
   if (UI) {                                    // handle hanya aktif saat garis atur terlihat
     if (sd) Q.forEach((p,i) => { if (Math.hypot(p[0]-x, p[1]-y) < 16/ps) hit = {t:'c', i}; });
     if (!hit && sd && Math.hypot(x-PH[0], y-PH[1]) < R) { const c = cen(); hit = {t:'rp', a:Math.atan2(y-c[1], x-c[0]), raw:0, base:v('rot')}; }
-    if (!hit && Math.hypot(x-th.hd[0], y-th.hd[1]) < R) hit = {t:'rt'};
+    if (!hit && Math.hypot(x-th.hd[0], y-th.hd[1]) < R) hit = {t:'rt', a:Math.atan2(y-T.y, x-T.x), raw:0, base:v('trot')};
   }
   if (!hit && hitText(x,y)) hit = {t:'t', ox:T.x-x, oy:T.y-y};
   if (!hit && sd && x >= 0 && x <= CW && y >= 0 && y <= CH) hit = {t:'p', x, y};
@@ -623,11 +623,17 @@ ov.addEventListener('pointermove', e => {
     Q[drag.i] = [x,y];
   } else if (drag.t === 'rp') {                // rotasi foto
     const c = cen(), a = Math.atan2(y-c[1], x-c[0]);
-    let d = a - drag.a; drag.a = a; d = Math.atan2(Math.sin(d), Math.cos(d)); drag.raw += d*180/Math.PI;
+    let d = a - drag.a; drag.a = a; d = Math.atan2(Math.sin(d), Math.cos(d)); drag.raw += d*180/Math.PI*(e.shiftKey ? .25 : 1);
+     
     const nt = snapAngle(drag.base + drag.raw); rotQ(nt - last.rot);
     const wv = wrap(nt); $('rot').value = wv; last.rot = wv;
-  } else if (drag.t === 'rt') {                // rotasi teks
-    $('trot').value = wrap(snapAngle(wrap(Math.atan2(y-T.y, x-T.x)*180/Math.PI + 90)));
+  
+  } else if (drag.t === 'rt') {
+    const a = Math.atan2(y-T.y, x-T.x);
+    let d = a - drag.a; drag.a = a; d = Math.atan2(Math.sin(d), Math.cos(d));
+    drag.raw += d*180/Math.PI*(e.shiftKey ? .25 : 1);
+    $('trot').value = wrap(snapAngle(drag.base + drag.raw));
+     
   } else if (drag.t === 't') {                 // pindah teks + snap ke tepi/tengah
     let nx = x + drag.ox, ny = y + drag.oy;
     if (sn) { [0,CW/2,CW].forEach(a => { if (Math.abs(nx-a) < TOL) nx = a; }); [0,CH/2,CH].forEach(a => { if (Math.abs(ny-a) < TOL) ny = a; }); }
