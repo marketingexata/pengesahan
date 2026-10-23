@@ -99,14 +99,15 @@ details h3{margin:12px 0 0; font-size:12.5px; color:var(--ac)}
 /* =====================================================
    4. PREVIEW
    ===================================================== */
-#preview{position:relative; flex:1; min-width:0; display:flex; flex-direction:column; background:var(--stage)}
-#mn{flex:1; min-width:0; min-height:0; display:flex; overflow:auto; padding:8px}
+#preview{position:relative; flex:1; min-width:0; display:flex; flex-direction:column; background:var(--stage); user-select:none; -webkit-user-select:none}
+#mn{flex:1; min-width:0; min-height:0; position:relative; overflow:hidden; touch-action:none}
 
 #dlbar{flex:none; padding:8px 12px calc(8px + env(safe-area-inset-bottom)); background:var(--pn); border-top:1px solid var(--bd)}
 #dlbar button.primary{margin-top:0}
-#stage{position:relative; flex:none; margin:auto}
+#stage{position:absolute; inset:0}
 #cv{position:absolute; background:#fff; box-shadow:0 2px 14px #0005}
-#ov{position:absolute; left:0; top:0; touch-action:none; cursor:grab}
+#ov{position:absolute; left:0; top:0; touch-action:none; cursor:grab; user-select:none; -webkit-user-select:none}
+#ov text{pointer-events:none; user-select:none; -webkit-user-select:none}
 
 #zoombar{position:absolute; top:10px; right:10px; z-index:5; display:flex; gap:4px}
 #zoombar button{min-width:36px; background:var(--pn); box-shadow:0 1px 4px #0003}
@@ -230,6 +231,7 @@ details h3{margin:12px 0 0; font-size:12.5px; color:var(--ac)}
 <section id="preview">
   <div id="zoombar">
     <button id="zout" type="button" aria-label="Zoom out">−</button>
+    <button id="zall" type="button" aria-label="Tampilkan semua titik atur" title="Tampilkan semua titik atur">⤢</button>
     <button id="zfit" type="button" aria-label="Ukuran pas">100%</button>
     <button id="zin"  type="button" aria-label="Zoom in">+</button>
   </div>
@@ -252,7 +254,7 @@ details h3{margin:12px 0 0; font-size:12.5px; color:var(--ac)}
    1. KONFIGURASI
    ===================================================== */
 const CW = 1101, CH = 1692;       // 3,671 x 5,639 in @ 300 ppi
-const MARGIN = 130;               // ruang di sekitar kanvas untuk handle
+const VM = 110, HM = 40;          // margin logis awal (atas/bawah untuk handle rotasi, kiri/kanan)
 const PT_TO_PX = 300 / 72;        // pt -> px pada 300 ppi
 const $ = id => document.getElementById(id);
 const v = id => +$(id).value;
@@ -285,6 +287,7 @@ let UI = true;                                // garis atur terlihat?
 let zm = 1, ps0 = .4, ps = .4, rs = .4;       // zoom, skala fit, skala tampilan, skala render
 let raf = 0, drag = null, pinch = null;
 const ptrs = new Map();
+let offX = 0, offY = 0, vw = 0, vh = 0;        // posisi kanvas di area preview (px) & ukuran area preview
 let srcCounter = 0;                           // id unik tiap sumber foto (untuk cache)
 
 
@@ -358,7 +361,7 @@ function applyPhotoParam(id){
     xf((x,y) => id === 'scl' ? [x*r, y*r] : id === 'sw' ? [x*r, y] : [x, y*r]);
   }
   last[id] = val;
-  fastMode();
+  fastMode(true);
   show();
 }
 
@@ -427,21 +430,23 @@ function drawPhoto(ctx, s){
   const M = sd._m[lv], d = M.d, W = M.w, Hh = M.h, kx = W/sw0, ky = Hh/sh0;
 
   const H = homog(Q, [[0,0],[sw0,0],[sw0,sh0],[0,sh0]]);
-  if (!OUT || OUT.width !== w || OUT.height !== h) OUT = ctx.createImageData(w,h);
-  const o = OUT.data;
+  if (!OUT || OUT.width !== w || OUT.height !== h) { OUT = ctx.createImageData(w,h); OUT.data.fill(255); }   // alpha selalu 255
+  const o = OUT.data, is = 1/s, du = H[0]*is, dv = H[3]*is, dq = H[6]*is;
 
-  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-    const X = (x+.5)/s, Y = (y+.5)/s, q = H[6]*X + H[7]*Y + 1;
-    const u = (H[0]*X + H[1]*Y + H[2])/q*kx - .5, t = (H[3]*X + H[4]*Y + H[5])/q*ky - .5, i = (y*w + x)*4;
-    o[i+3] = 255;
-    if (u < -.5 || t < -.5 || u > W-.5 || t > Hh-.5) { o[i] = o[i+1] = o[i+2] = 255; continue; }
+  for (let y = 0; y < h; y++) {
+    const Y = (y+.5)*is;                       // numerator & penyebut proyeksi dihitung inkremental per baris
+    let nu = H[0]*.5*is + H[1]*Y + H[2], nv = H[3]*.5*is + H[4]*Y + H[5], nq = H[6]*.5*is + H[7]*Y + 1;
+    for (let x = 0, i = y*w*4; x < w; x++, i += 4, nu += du, nv += dv, nq += dq) {
+      const u = nu/nq*kx - .5, t = nv/nq*ky - .5;
+      if (!(u >= -.5 && t >= -.5 && u <= W-.5 && t <= Hh-.5)) { o[i] = o[i+1] = o[i+2] = 255; continue; }
 
-    const uu = Math.max(0,u), tt = Math.max(0,t);                 // interpolasi bilinear
-    const x0 = Math.min(W-1, uu|0), y0 = Math.min(Hh-1, tt|0);
-    const x1 = Math.min(W-1, x0+1), y1 = Math.min(Hh-1, y0+1), fx = uu-x0, fy = tt-y0;
-    for (let c = 0; c < 3; c++) {
-      const a = d[(y0*W+x0)*4+c], b = d[(y0*W+x1)*4+c], e = d[(y1*W+x0)*4+c], f = d[(y1*W+x1)*4+c];
-      o[i+c] = (a*(1-fx) + b*fx)*(1-fy) + (e*(1-fx) + f*fx)*fy;
+      const uu = u > 0 ? u : 0, tt = t > 0 ? t : 0;                // interpolasi bilinear
+      const x0 = Math.min(W-1, uu|0), y0 = Math.min(Hh-1, tt|0), x1 = Math.min(W-1, x0+1), y1 = Math.min(Hh-1, y0+1);
+      const fx = uu-x0, fy = tt-y0, w00 = (1-fx)*(1-fy), w10 = fx*(1-fy), w01 = (1-fx)*fy, w11 = fx*fy;
+      const a = (y0*W+x0)*4, b = (y0*W+x1)*4, c = (y1*W+x0)*4, e = (y1*W+x1)*4;
+      o[i]   = d[a]  *w00 + d[b]  *w10 + d[c]  *w01 + d[e]  *w11;
+      o[i+1] = d[a+1]*w00 + d[b+1]*w10 + d[c+1]*w01 + d[e+1]*w11;
+      o[i+2] = d[a+2]*w00 + d[b+2]*w10 + d[c+2]*w01 + d[e+2]*w11;
     }
   }
   ctx.putImageData(OUT, 0, 0);
@@ -524,36 +529,52 @@ function localColor(ctx, s, w, h){             // warna rata-rata foto di bawah 
   return [R/N, G/N, B/N];
 }
 
-function drawText(ctx, s){
-  const w = Math.round(CW*s), h = Math.round(CH*s), op = v('top')/100, bl = v('tbl')*.2;   // blur 100% = 20 px
-  measure();
-  ctx.save(); ctx.setTransform(1,0,0,1,0,0);
+let INK = '#2a2a2a';                           // warna tinta terakhir (dipakai mode sederhana)
 
-  if (!$('blend').checked) {                   // mode manual
-    ctx.globalAlpha = op;
-    if (bl > 0) ctx.filter = `blur(${bl*s}px)`;
-    paintText(ctx, s, '#111'); ctx.restore(); return;
-  }
-
-  // mode samakan dengan foto: tinta berwarna lokal + multiply + blur otomatis + grain (hanya di area teks)
-  const [r,g,b] = localColor(ctx, s, w, h), sb = AN ? AN.sb : .5, ns = AN ? AN.ns : .15;
-  const [x0,y0,x1,y1] = textBox(s, w, h, Math.ceil((bl+sb)*s*3) + 4), bw = x1-x0, bh = y1-y0;
-  if (bw <= 0 || bh <= 0) { ctx.restore(); return; }
+// gambar teks ke lapisan sementara lalu tempel (blur/blend dibatasi di kotak teks agar ringan)
+function layerDraw(ctx, s, w, h, color, blurPx, comp, op){
+  const [x0,y0,x1,y1] = textBox(s, w, h, Math.ceil(blurPx*3) + 4), bw = x1-x0, bh = y1-y0;
+  if (bw <= 0 || bh <= 0) return null;
   if (!L1 || L1.width !== w || L1.height !== h) {
     L1 = mk(w,h); L2 = mk(w,h);
     L1.getContext('2d', {willReadFrequently:true}); L2.getContext('2d', {willReadFrequently:true});
   }
-
   const g1 = L1.getContext('2d'); g1.setTransform(1,0,0,1,0,0); g1.clearRect(x0,y0,bw,bh);
-  paintText(g1, s, `rgb(${r*.22|0},${g*.22|0},${b*.22|0})`);
-  ctx.globalAlpha = op; ctx.globalCompositeOperation = 'multiply'; ctx.filter = `blur(${(bl+sb)*s}px)`;
+  paintText(g1, s, color);
+  ctx.save(); ctx.beginPath(); ctx.rect(x0,y0,bw,bh); ctx.clip();
+  ctx.globalAlpha = op; ctx.globalCompositeOperation = comp;
+  if (blurPx > 0) ctx.filter = `blur(${blurPx}px)`;
   ctx.drawImage(L1, x0, y0, bw, bh, x0, y0, bw, bh);
+  ctx.restore();
+  return [x0,y0,bw,bh];
+}
 
-  const g2 = L2.getContext('2d');
+function drawText(ctx, s){
+  const w = Math.round(CW*s), h = Math.round(CH*s), op = v('top')/100, bl = v('tbl')*.2;   // blur 100% = 20 px
+  const blend = $('blend').checked;
+  measure();
+  ctx.save(); ctx.setTransform(1,0,0,1,0,0);
+
+  if (FASTT) {                                 // sedang digeser/diatur di preview: teks sederhana
+    ctx.globalAlpha = op; paintText(ctx, s, blend ? INK : '#111'); ctx.restore(); return;
+  }
+  if (!blend) {                                // mode manual
+    if (bl > 0) layerDraw(ctx, s, w, h, '#111', bl*s, 'source-over', op);
+    else { ctx.globalAlpha = op; paintText(ctx, s, '#111'); }
+    ctx.restore(); return;
+  }
+
+  // mode samakan dengan foto: tinta berwarna lokal + multiply + blur otomatis + grain
+  const [r,g,b] = localColor(ctx, s, w, h), sb = AN ? AN.sb : .5, ns = AN ? AN.ns : .15;
+  INK = `rgb(${r*.22|0},${g*.22|0},${b*.22|0})`;
+  const box = layerDraw(ctx, s, w, h, INK, (bl+sb)*s, 'multiply', op);
+  if (!box) { ctx.restore(); return; }
+
+  const [x0,y0,bw,bh] = box, g2 = L2.getContext('2d');
   g2.save(); g2.setTransform(1,0,0,1,0,0); g2.beginPath(); g2.rect(x0,y0,bw,bh); g2.clip(); g2.clearRect(x0,y0,bw,bh);
   g2.setTransform(s,0,0,s,0,0); g2.fillStyle = g2.createPattern(noiseTile(), 'repeat'); g2.fillRect(x0/s, y0/s, bw/s, bh/s);
   g2.setTransform(1,0,0,1,0,0); g2.globalCompositeOperation = 'destination-in'; g2.drawImage(L1, 0, 0); g2.restore();
-  ctx.filter = 'none'; ctx.globalAlpha = op*ns; ctx.globalCompositeOperation = 'overlay';
+  ctx.globalAlpha = op*ns; ctx.globalCompositeOperation = 'overlay';
   ctx.drawImage(L2, x0, y0, bw, bh, x0, y0, bw, bh);
   ctx.restore();
 }
@@ -565,20 +586,24 @@ function drawText(ctx, s){
 const cv = $('cv'), pctx = cv.getContext('2d', {willReadFrequently:true}), ov = $('ov');
 
 function layout(){                             // hitung skala fit sesuai ukuran area preview
-  const mn = $('mn');
-  ps0 = Math.max(.12, Math.min((mn.clientHeight-16)/(CH+2*MARGIN), (mn.clientWidth-16)/(CW+2*MARGIN)));
-  applySize();
+  const mn = $('mn'); vw = mn.clientWidth; vh = mn.clientHeight;
+  ps0 = Math.max(.08, Math.min(vh/(CH + 2*VM), vw/(CW + 2*HM)));
+  applySize(true);
 }
-function applySize(){
-  ps = ps0*zm; rs = Math.min(ps, .6);          // resolusi render dibatasi agar tetap ringan
-  const st = $('stage'), tot = (CW+2*MARGIN)*ps;
-  st.style.width = tot+'px'; st.style.height = (CH+2*MARGIN)*ps+'px';
-  cv.width = Math.round(CW*rs); cv.height = Math.round(CH*rs);
-  cv.style.left = cv.style.top = MARGIN*ps+'px'; cv.style.width = CW*ps+'px'; cv.style.height = CH*ps+'px';
-  ov.setAttribute('width', tot); ov.setAttribute('height', (CH+2*MARGIN)*ps);
-  ov.setAttribute('viewBox', `${-MARGIN} ${-MARGIN} ${CW+2*MARGIN} ${CH+2*MARGIN}`);
+function applySize(center){
+  ps = ps0*zm; rs = Math.max(.05, Math.min(ps, .6));          // resolusi render dibatasi agar tetap ringan
+  const w = Math.round(CW*rs), h = Math.round(CH*rs);
+  if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+  cv.style.width = CW*ps+'px'; cv.style.height = CH*ps+'px';
+  if (center) { offX = (vw - CW*ps)/2; offY = (vh - CH*ps)/2; }
+  placeView();
   $('zfit').textContent = Math.round(zm*100)+'%';
   show();
+}
+function placeView(){                          // posisi kanvas + sistem koordinat overlay mengikuti pan/zoom
+  cv.style.left = offX+'px'; cv.style.top = offY+'px';
+  ov.setAttribute('width', vw); ov.setAttribute('height', vh);
+  ov.setAttribute('viewBox', `${-offX/ps} ${-offY/ps} ${vw/ps} ${vh/ps}`);
 }
 
 const TH = () => {                             // posisi handle rotasi teks
@@ -587,18 +612,19 @@ const TH = () => {                             // posisi handle rotasi teks
 };
 const PH = [CW/2, -65];                        // posisi handle rotasi foto
 
-let FAST = false, fastTimer = 0;               // saat foto digeser/diputar: render setengah resolusi, lalu tajam lagi
-function fastMode(){
-  FAST = true; clearTimeout(fastTimer);
-  fastTimer = setTimeout(() => { FAST = false; show(); }, 160);
+let FAST = false, FASTT = false, fastTimer = 0; // FAST: foto resolusi rendah; FASTT: teks sederhana (saat digeser)
+function fastMode(photo){
+  FASTT = true; if (photo) FAST = true;
+  clearTimeout(fastTimer);
+  fastTimer = setTimeout(() => { FAST = FASTT = false; show(); }, 160);   // diam 0,16 dtk => kualitas penuh
 }
 
 function show(){
   if (raf) return;
   raf = requestAnimationFrame(() => {
     raf = 0;
-    drawPhotoCached(pctx, FAST ? rs*.5 : rs); drawText(pctx, rs); pctx.filter = 'none';
-    for (const id in PARAMS) $(id+'_v').textContent = v(id) + PARAMS[id].unit;
+    drawPhotoCached(pctx, FAST ? Math.min(rs*.5, .25) : rs); drawText(pctx, rs); pctx.filter = 'none';
+    for (const id in PARAMS) { const o = $(id+'_v'), tx = v(id) + PARAMS[id].unit; if (o.textContent !== tx) o.textContent = tx; }
     ov.innerHTML = UI ? overlayMarkup() : '';
   });
 }
@@ -608,7 +634,7 @@ function overlayMarkup(){
   const handle = (p, col, t) =>
     `<circle cx="${p[0]}" cy="${p[1]}" r="${r*1.3}" fill="${col}" stroke="#000" stroke-width="${sw}"/>
      <text x="${p[0]}" y="${p[1]}" text-anchor="middle" dominant-baseline="central" font-size="${r*1.7}" fill="#000">↻</text>`;
-  return (sd ? `<polygon points="${Q.map(p => p.join(',')).join(' ')}" fill="none" stroke="#e3b341" stroke-width="${2/ps}" stroke-dasharray="${8/ps} ${5/ps}"/>` : '')
+  return (sd ? `<polygon points="${Q.map(p => p.join(',')).join(' ')}" fill="none" stroke="#e3b341" stroke-width="${2/ps}"${Q.some(p => Math.abs(p[0]) > 6000 || Math.abs(p[1]) > 9000) ? '' : ` stroke-dasharray="${8/ps} ${5/ps}"`}/>` : '')
     + `<rect x="0" y="0" width="${CW}" height="${CH}" fill="none" stroke="#6b8afd" stroke-width="${1/ps}"/>`
     + `<g transform="translate(${T.x} ${T.y}) rotate(${v('trot')}) scale(${sx} ${sy})">
          <rect x="${-T.w/2-12}" y="-62" width="${T.w+24}" height="130" fill="none" stroke="#3fb8b0" stroke-width="${sw/Math.min(sx,sy)}" stroke-dasharray="${5/ps} ${4/ps}"/></g>`
@@ -619,26 +645,42 @@ function overlayMarkup(){
 
 function setUI(on){ if (UI !== on) { UI = on; show(); } }
 
-/* zoom: bergerak mengikuti titik (kursor / pusat pinch) */
+/* zoom: 15% - 400%, mengikuti titik (kursor / pusat pinch); zoom out = ruang atur lebih luas */
 function zoomAt(nz, cx, cy){
-  nz = Math.min(4, Math.max(1, nz));
+  nz = Math.min(4, Math.max(.15, nz));
   if (nz === zm) return;
-  const mn = $('mn'), r = $('stage').getBoundingClientRect(), lx = (cx - r.left)/ps, ly = (cy - r.top)/ps;
-  zm = nz; applySize();
-  const r2 = $('stage').getBoundingClientRect();
-  mn.scrollLeft += r2.left + lx*ps - cx; mn.scrollTop += r2.top + ly*ps - cy;
+  const r = $('mn').getBoundingClientRect(), px = cx - r.left, py = cy - r.top;
+  const lx = (px - offX)/ps, ly = (py - offY)/ps;
+  zm = nz; ps = ps0*zm; offX = px - lx*ps; offY = py - ly*ps;
+  applySize();
 }
 const zoomCenter = f => { const r = $('mn').getBoundingClientRect(); zoomAt(zm*f, r.left + r.width/2, r.top + r.height/2); };
 $('zin').onclick  = () => zoomCenter(1.25);
 $('zout').onclick = () => zoomCenter(1/1.25);
-$('zfit').onclick = () => { zm = 1; applySize(); $('mn').scrollLeft = $('mn').scrollTop = 0; };
+$('zfit').onclick = () => { zm = 1; applySize(true); };
 $('mn').addEventListener('wheel', e => { e.preventDefault(); zoomAt(zm*Math.exp(-e.deltaY*.0015), e.clientX, e.clientY); }, {passive:false});
+
+/* tampilkan semua titik atur: kanvas + 4 sudut foto + handle rotasi (zoom out otomatis sejauh perlu) */
+const handlePoints = () => [[0,0], [CW,CH], PH, TH().hd, ...(sd ? Q : [])];
+function fitAll(){
+  const P = handlePoints(), xs = P.map(p => p[0]), ys = P.map(p => p[1]), pad = 40;
+  const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const k = Math.min((vw - 2*pad)/Math.max(1, x1-x0), (vh - 2*pad)/Math.max(1, y1-y0), ps0*4);
+  zm = k/ps0; ps = k;
+  offX = (vw - (x1-x0)*k)/2 - x0*k; offY = (vh - (y1-y0)*k)/2 - y0*k;
+  applySize(); setUI(true);
+}
+function revealHandles(){                      // ada titik atur di luar layar? => tampilkan semua agar tetap bisa dijangkau
+  const M = 24;
+  if (handlePoints().some(([x,y]) => { const px = offX + x*ps, py = offY + y*ps; return px < M || py < M || px > vw-M || py > vh-M; })) fitAll();
+}
+$('zall').onclick = fitAll;
 
 
 /* =====================================================
    8. INTERAKSI PREVIEW (geser, rotasi, sudut, pinch)
    ===================================================== */
-const pt = e => { const b = ov.getBoundingClientRect(); return [(e.clientX-b.left)/ps - MARGIN, (e.clientY-b.top)/ps - MARGIN]; };
+const pt = e => { const b = $('mn').getBoundingClientRect(); return [(e.clientX - b.left - offX)/ps, (e.clientY - b.top - offY)/ps]; };
 
 function hitText(x, y){
   const dx = x - T.x, dy = y - T.y, a = -v('trot')*Math.PI/180, c = Math.cos(a), s = Math.sin(a);
@@ -651,9 +693,16 @@ document.addEventListener('pointerdown', e => {
   if (!$('stage').contains(e.target) && !$('zoombar').contains(e.target) && !$('dlbar').contains(e.target)) setUI(false);
 });
 
+ov.addEventListener('contextmenu', e => e.preventDefault());   // klik kanan dipakai untuk menarik titik, bukan membuka menu
+// cegah seleksi teks & drag bawaan browser: jika tidak, drag ke-2 dst. dibatalkan browser (pointercancel)
+['mousedown', 'selectstart', 'dragstart'].forEach(n => ov.addEventListener(n, e => e.preventDefault()));
+
 ov.addEventListener('pointerdown', e => {
+  const sel = getSelection(); if (sel && sel.rangeCount) sel.removeAllRanges();   // buang seleksi sisa
+  for (const id of [...ptrs.keys()]) if (e.pointerType !== 'touch' || !ov.hasPointerCapture(id)) ptrs.delete(id);   // buang pointer sisa
   ptrs.set(e.pointerId, {x:e.clientX, y:e.clientY});
   ov.setPointerCapture(e.pointerId);
+  if (e.button === 1) { e.preventDefault(); drag = {t:'pan', x:e.clientX, y:e.clientY}; ov.style.cursor = 'grabbing'; return; }   // klik tengah: geser tampilan
   if (ptrs.size === 2) {                       // dua jari: pinch zoom
     const [a,b] = [...ptrs.values()];
     pinch = {d:Math.hypot(a.x-b.x, a.y-b.y), cx:(a.x+b.x)/2, cy:(a.y+b.y)/2}; drag = null; return;
@@ -666,24 +715,35 @@ ov.addEventListener('pointerdown', e => {
     if (!hit && Math.hypot(x-th.hd[0], y-th.hd[1]) < R) hit = {t:'rt'};
   }
   if (!hit && hitText(x,y)) hit = {t:'t', ox:T.x-x, oy:T.y-y};
-  if (!hit && sd && x >= 0 && x <= CW && y >= 0 && y <= CH) hit = {t:'p', x, y};
+  if (!hit && sd && (inQuad([x,y]) || (x >= 0 && x <= CW && y >= 0 && y <= CH))) hit = {t:'p', x, y};
 
-  drag = hit; setUI(!!hit);
-  if (hit) ov.style.cursor = 'grabbing';
+  if (!hit) hit = {t:'pan', x:e.clientX, y:e.clientY};     // area kosong: geser tampilan
+  drag = hit; setUI(hit.t !== 'pan');
+  ov.style.cursor = 'grabbing';
 });
 
 ov.addEventListener('pointermove', e => {
+  if (drag && e.pointerType === 'mouse' && e.buttons === 0) { endDrag(); return; }   // pointerup hilang (mis. menu klik kanan)
   if (ptrs.has(e.pointerId)) ptrs.set(e.pointerId, {x:e.clientX, y:e.clientY});
 
   if (pinch && ptrs.size === 2) {              // zoom + geser dengan dua jari
     const [a,b] = [...ptrs.values()], d = Math.hypot(a.x-b.x, a.y-b.y), cx = (a.x+b.x)/2, cy = (a.y+b.y)/2;
+    offX += cx - pinch.cx; offY += cy - pinch.cy; placeView();
     zoomAt(zm*d/pinch.d, cx, cy);
-    $('mn').scrollLeft -= cx - pinch.cx; $('mn').scrollTop -= cy - pinch.cy;
     pinch = {d, cx, cy}; return;
   }
   if (!drag) return;
+  if (drag.t === 'pan') { offX += e.clientX - drag.x; offY += e.clientY - drag.y; drag.x = e.clientX; drag.y = e.clientY; placeView(); return; }
 
-  let [x,y] = pt(e); const sn = $('snap').checked, TOL = 12;
+  lastClient = {x:e.clientX, y:e.clientY};
+  const [x,y] = pt(e); moveDrag(x, y);
+  if (!edgeRaf) edgeRaf = requestAnimationFrame(edgeTick);
+});
+
+// terapkan gerakan pointer (x,y = koordinat logis kanvas) ke objek yang sedang ditarik
+function moveDrag(x, y){
+  if (!drag) return;
+  const sn = $('snap').checked, TOL = 12;
   if (drag.t === 'c') {                        // titik sudut (perspektif) + snap ke sudut kanvas
     if (sn) { [0,CW].forEach(a => { if (Math.abs(x-a) < TOL) x = a; }); [0,CH].forEach(a => { if (Math.abs(y-a) < TOL) y = a; }); }
     Q[drag.i] = [x,y];
@@ -701,13 +761,34 @@ ov.addEventListener('pointermove', e => {
   } else {                                     // geser foto
     const dx = x - drag.x, dy = y - drag.y; Q = Q.map(p => [p[0]+dx, p[1]+dy]); drag.x = x; drag.y = y;
   }
-  if (drag.t === 'c' || drag.t === 'rp' || drag.t === 'p') fastMode();
+  Q = Q.map(p => [Math.max(-40000, Math.min(40000, p[0])), Math.max(-40000, Math.min(40000, p[1]))]);
+  fastMode(drag.t === 'c' || drag.t === 'rp' || drag.t === 'p');
   show();
-});
+}
 
-const endPtr = e => { ptrs.delete(e.pointerId); if (ptrs.size < 2) pinch = null; if (!ptrs.size) { drag = null; ov.style.cursor = 'grab'; } };
-ov.addEventListener('pointerup', endPtr);
-ov.addEventListener('pointercancel', endPtr);
+// pointer di dekat/di luar tepi preview => tampilan bergeser otomatis, sehingga bisa ditarik sejauh apa pun
+let lastClient = null, edgeRaf = 0;
+function edgeTick(){
+  edgeRaf = 0;
+  if (!drag || drag.t === 'pan' || !lastClient) return;
+  const r = $('mn').getBoundingClientRect(), EM = 28;
+  const ox = lastClient.x < r.left + EM ? lastClient.x - (r.left + EM) : lastClient.x > r.right - EM ? lastClient.x - (r.right - EM) : 0;
+  const oy = lastClient.y < r.top + EM ? lastClient.y - (r.top + EM) : lastClient.y > r.bottom - EM ? lastClient.y - (r.bottom - EM) : 0;
+  if (!ox && !oy) return;
+  offX -= Math.max(-26, Math.min(26, ox*.3)); offY -= Math.max(-26, Math.min(26, oy*.3));
+  placeView();
+  const [x,y] = pt({clientX:lastClient.x, clientY:lastClient.y}); moveDrag(x, y);
+  edgeRaf = requestAnimationFrame(edgeTick);
+}
+
+function endDrag(){                            // akhiri semua interaksi pointer (aman dipanggil kapan saja)
+  const k = drag && drag.t;
+  ptrs.clear(); pinch = null; drag = null; ov.style.cursor = 'grab';
+  if (k === 'c' || k === 'rp' || k === 'p') revealHandles();
+}
+const endPtr = e => { ptrs.delete(e.pointerId); if (ptrs.size < 2) pinch = null; if (!ptrs.size) endDrag(); };
+['pointerup', 'pointercancel', 'lostpointercapture'].forEach(n => ov.addEventListener(n, endPtr));
+addEventListener('blur', endDrag);
 
 
 /* =====================================================
