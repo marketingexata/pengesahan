@@ -175,36 +175,53 @@ details h3{margin:12px 0 0; font-size:12.5px; color:var(--ac)}
 
   <!-- Langkah 4 -->
   <section class="step">
-    <h2><span class="n">4</span>Input nama pengesahan, atur posisinya di layar preview ya.</h2>
-    <p class="d">Buat nama pengesahan di bawah “NAMA TAMBAHAN / ADDITIONAL NAME :”.</p>
-    <input type="text" id="nm" value="NAMANYA MUNCUL DISINI" aria-label="Nama">
+    <h2><span class="n">4</span>Kecerahan foto</h2>
+    <p class="d">Geser Exposure buat bikin foto lebih terang atau lebih gelap. Mau lebih detail? Buka pengaturan lanjutan di bawahnya.</p>
+    <div data-slider="exp"></div>
+    <details>
+      <summary>Pengaturan kecerahan lanjutan</summary>
+      <div data-slider="bri"></div>
+      <div data-slider="con"></div>
+      <div data-slider="sat"></div>
+      <div data-slider="gam"></div>
+      <div class="row mt" style="margin-bottom:12px">
+        <button id="tonereset" type="button">Reset semua kecerahan</button>
+      </div>
+    </details>
   </section>
 
   <!-- Langkah 5 -->
   <section class="step">
-    <h2><span class="n">5</span>Auto samain teks ke cahaya &amp; kualitas foto</h2>
-    <p class="d">Centang kotak ini biar teks otomatis menyamakan diri sama kualitas fotonya.</p>
-    <label class="check"><input type="checkbox" id="blend" checked> Samakan teks dengan foto</label>
+    <h2><span class="n">5</span>Input nama pengesahan, atur posisinya di layar preview ya.</h2>
+    <p class="d">Buat nama pengesahan di bawah “NAMA TAMBAHAN / ADDITIONAL NAME :”.</p>
+    <input type="text" id="nm" value="NAMANYA MUNCUL DISINI" aria-label="Nama">
   </section>
 
   <!-- Langkah 6 -->
   <section class="step">
-    <h2><span class="n">6</span>Lengkungan teks</h2>
-    <p class="d">Atur ini kalo mau lengkungin teks biar ikutin foto.</p>
-    <div data-slider="tcur"></div>
+    <h2><span class="n">6</span>Auto samain teks ke cahaya &amp; kualitas foto</h2>
+    <p class="d">Centang kotak ini biar teks otomatis menyamakan diri sama kualitas fotonya.</p>
+    <label class="check"><input type="checkbox" id="blend" checked> Samakan teks dengan foto</label>
   </section>
 
   <!-- Langkah 7 -->
   <section class="step">
-    <h2><span class="n">7</span>Kesamaran teks</h2>
-    <p class="d">Kalo teks keliatan masih tebal, atur kesamaran teks di sini.</p>
-    <div data-slider="top"></div>
+    <h2><span class="n">7</span>Lengkungan teks</h2>
+    <p class="d">Atur ini kalo mau lengkungin teks biar ikutin foto.</p>
+    <div data-slider="tcur"></div>
   </section>
 
   <!-- Langkah 8 -->
   <section class="step">
-    <h2><span class="n">8</span>Blur teks</h2>
-    <p class="d">Kalo teks keliatan terlalu blur atau tajam, ilangin centang di langkah 5, terus atur blur teksnya manual di sini.</p>
+    <h2><span class="n">8</span>Kesamaran teks</h2>
+    <p class="d">Kalo teks keliatan masih tebal, atur kesamaran teks di sini.</p>
+    <div data-slider="top"></div>
+  </section>
+
+  <!-- Langkah 9 -->
+  <section class="step">
+    <h2><span class="n">9</span>Blur teks</h2>
+    <p class="d">Kalo teks keliatan terlalu blur atau tajam, ilangin centang di langkah 6, terus atur blur teksnya manual di sini.</p>
     <div data-slider="tbl"></div>
   </section>
 
@@ -270,9 +287,16 @@ const PARAMS = {
   tsx : {label:'Stretch lebar teks', min:30,   max:300, step:1,  def:100, unit:'%'},
   tsy : {label:'Stretch tinggi teks',min:30,   max:300, step:1,  def:100, unit:'%'},
   top : {label:'Opacity teks',       min:0,    max:100, step:1,  def:100, unit:'%'},
-  tbl : {label:'Blur teks',          min:0,    max:100, step:.5, def:0,   unit:'%'}
+  tbl : {label:'Blur teks',          min:0,    max:100, step:.5, def:0,   unit:'%'},
+  // kecerahan foto (exp = slider utama; sisanya di opsi lanjutan)
+  exp : {label:'Exposure',   min:-3,   max:3,   step:.05, def:0, unit:' EV'},
+  bri : {label:'Brightness', min:-100, max:100, step:1,   def:0, unit:''},
+  con : {label:'Kontras',    min:-100, max:100, step:1,   def:0, unit:''},
+  sat : {label:'Saturasi',   min:-100, max:100, step:1,   def:0, unit:''},
+  gam : {label:'Gamma',      min:.2,   max:3,   step:.01, def:1, unit:''}
 };
 const PHOTO_IDS = ['rot','scl','sw','sh'];
+const TONE_IDS  = ['exp','bri','con','sat','gam'];   // kecerahan foto
 
 
 /* =====================================================
@@ -313,10 +337,13 @@ function snapAngle(a){
 
 function onParam(id){
   if (PHOTO_IDS.includes(id)) return applyPhotoParam(id);
+  if (TONE_IDS.includes(id)) { fastMode(true); return show(); }
   if (id === 'trot') $(id).value = snapAngle(v(id));
   show();
 }
 function resetParam(id){ $(id).value = PARAMS[id].def; onParam(id); }
+function toneReset(){ TONE_IDS.forEach(id => $(id).value = PARAMS[id].def); show(); }
+$('tonereset').onclick = toneReset;
 
 Object.keys(PARAMS).forEach(id => {
   $(id).addEventListener('input',    () => onParam(id));
@@ -418,7 +445,25 @@ function buildMips(src, data){                 // piramida 1/1, 1/2, 1/4, 1/8: s
   return m;
 }
 
-function drawPhoto(ctx, s){
+/* kecerahan foto: tabel 256 nilai (exposure -> brightness -> kontras -> gamma) + saturasi per piksel.
+   null jika semua slider di nilai awal (tanpa biaya hitung). */
+const toneKey = () => TONE_IDS.map(v).join(',');
+function toneLUT(){
+  const ev = v('exp'), br = v('bri')/100, c = Math.min(.99, v('con')/100), sa = v('sat'), gm = v('gam');
+  if (!ev && !br && !c && !sa && gm === 1) return null;
+  const f = Math.tan((c + 1)*Math.PI/4), gk = Math.pow(2, ev), l = new Uint8ClampedArray(256);
+  for (let i = 0; i < 256; i++) {
+    let n = i/255;
+    if (ev) n = Math.pow(Math.pow(n, 2.2)*gk, 1/2.2);   // exposure di cahaya linear (seperti kamera)
+    n += br*.5;
+    n = (n - .5)*f + .5;
+    n = Math.min(1, Math.max(0, n));
+    l[i] = Math.round(Math.pow(n, 1/gm)*255);
+  }
+  return {l, s:1 + sa/100};
+}
+
+function drawPhoto(ctx, s, tone){
   const w = Math.round(CW*s), h = Math.round(CH*s);
   ctx.setTransform(1,0,0,1,0,0);
   ctx.fillStyle = '#fff'; ctx.fillRect(0,0,w,h);
@@ -432,6 +477,7 @@ function drawPhoto(ctx, s){
   const H = homog(Q, [[0,0],[sw0,0],[sw0,sh0],[0,sh0]]);
   if (!OUT || OUT.width !== w || OUT.height !== h) { OUT = ctx.createImageData(w,h); OUT.data.fill(255); }   // alpha selalu 255
   const o = OUT.data, is = 1/s, du = H[0]*is, dv = H[3]*is, dq = H[6]*is;
+  const TN = tone === false ? null : toneLUT();   // false = tanpa efek kecerahan (dipakai crop)
 
   for (let y = 0; y < h; y++) {
     const Y = (y+.5)*is;                       // numerator & penyebut proyeksi dihitung inkremental per baris
@@ -444,9 +490,14 @@ function drawPhoto(ctx, s){
       const x0 = Math.min(W-1, uu|0), y0 = Math.min(Hh-1, tt|0), x1 = Math.min(W-1, x0+1), y1 = Math.min(Hh-1, y0+1);
       const fx = uu-x0, fy = tt-y0, w00 = (1-fx)*(1-fy), w10 = fx*(1-fy), w01 = (1-fx)*fy, w11 = fx*fy;
       const a = (y0*W+x0)*4, b = (y0*W+x1)*4, c = (y1*W+x0)*4, e = (y1*W+x1)*4;
-      o[i]   = d[a]  *w00 + d[b]  *w10 + d[c]  *w01 + d[e]  *w11;
-      o[i+1] = d[a+1]*w00 + d[b+1]*w10 + d[c+1]*w01 + d[e+1]*w11;
-      o[i+2] = d[a+2]*w00 + d[b+2]*w10 + d[c+2]*w01 + d[e+2]*w11;
+      let R = d[a]  *w00 + d[b]  *w10 + d[c]  *w01 + d[e]  *w11,
+          G = d[a+1]*w00 + d[b+1]*w10 + d[c+1]*w01 + d[e+1]*w11,
+          B = d[a+2]*w00 + d[b+2]*w10 + d[c+2]*w01 + d[e+2]*w11;
+      if (TN) {
+        R = TN.l[(R+.5)|0]; G = TN.l[(G+.5)|0]; B = TN.l[(B+.5)|0];
+        if (TN.s !== 1) { const lm = .299*R + .587*G + .114*B; R = lm + (R-lm)*TN.s; G = lm + (G-lm)*TN.s; B = lm + (B-lm)*TN.s; }
+      }
+      o[i] = R; o[i+1] = G; o[i+2] = B;
     }
   }
   ctx.putImageData(OUT, 0, 0);
@@ -455,7 +506,7 @@ function drawPhoto(ctx, s){
 // preview: hasil warp disimpan; hanya dihitung ulang jika foto/sudut/ukuran berubah
 function drawPhotoCached(ctx, s){
   const w = Math.round(CW*s), h = Math.round(CH*s);
-  const key = s + '|' + (sd ? sd._id : 0) + '|' + Q.map(p => p[0].toFixed(2) + ',' + p[1].toFixed(2)).join(';');
+  const key = toneKey() + '|' + s + '|' + (sd ? sd._id : 0) + '|' + Q.map(p => p[0].toFixed(2) + ',' + p[1].toFixed(2)).join(';');
   if (!PC || PC.width !== w || PC.height !== h) { PC = mk(w,h); PC.getContext('2d', {willReadFrequently:true}); PCkey = ''; }
   if (key !== PCkey) { drawPhoto(PC.getContext('2d'), s); PCkey = key; }
   ctx.setTransform(1,0,0,1,0,0); ctx.imageSmoothingEnabled = true;
@@ -801,7 +852,7 @@ function load(f){
     const k = Math.min(1, 2600/Math.max(im.width, im.height));    // batasi ukuran agar ringan
     sc = mk(Math.round(im.width*k), Math.round(im.height*k)); sw0 = sc.width; sh0 = sc.height;
     const g = sc.getContext('2d', {willReadFrequently:true}); g.drawImage(im, 0, 0, sw0, sh0);
-    sd = g.getImageData(0, 0, sw0, sh0); sd._m = buildMips(sc, sd.data); sd._id = ++srcCounter; AN = analyze(); resetPhoto(); setUI(true);
+    sd = g.getImageData(0, 0, sw0, sh0); sd._m = buildMips(sc, sd.data); sd._id = ++srcCounter; AN = analyze(); toneReset(); resetPhoto(); setUI(true);
     cropStack.length = 0; updateCropButtons();
     URL.revokeObjectURL(im.src);
   };
@@ -842,7 +893,7 @@ function doCrop(){
   // render bagian yang terlihat di preview menjadi foto baru (detail asli dipertahankan, maks. 2x)
   const s = Math.min(2, Math.max(1, Math.sqrt(sw0*sh0/quadArea())));
   const c = mk(Math.round(CW*s), Math.round(CH*s));
-  drawPhoto(c.getContext('2d', {willReadFrequently:true}), s);
+  drawPhoto(c.getContext('2d', {willReadFrequently:true}), s, false);   // kecerahan tidak ikut di-crop
 
   sc = c; sw0 = c.width; sh0 = c.height;
   sd = c.getContext('2d').getImageData(0, 0, sw0, sh0); sd._m = buildMips(sc, sd.data); sd._id = ++srcCounter;
